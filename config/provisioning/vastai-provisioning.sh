@@ -33,6 +33,7 @@ apt-get update && \
     libgomp1 \
     kde-plasma-desktop \
     tigervnc-standalone-server \
+    tigervnc-tools \
     tigervnc-xorg-extension \
     dbus-x11 \
     x11-xserver-utils \

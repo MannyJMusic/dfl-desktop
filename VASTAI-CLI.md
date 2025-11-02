@@ -86,13 +86,40 @@ vastai create template \
 - OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN configure the Instance Portal open button behavior
 - When external port ≠ internal port (like `1111:11111`), Caddy reverse proxy makes the application available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal).
 
+## List Your Templates
+
+Before creating an instance from a template, verify it exists and get its hash:
+
+```bash
+vastai search templates
+```
+
+This will show all your templates with their names, IDs, and hashes. Look for "DeepFaceLab Desktop" and note the template hash or ID.
+
+To search specifically for your template:
+
+```bash
+vastai search templates --raw | grep -i "DeepFaceLab"
+```
+
 ## Create Instance from Template
 
-After creating the template, create an instance from it:
+After creating the template and verifying it exists, create an instance from it using either the template name or the template hash:
+
+**Using template name:**
 
 ```bash
 vastai create instance <OFFER_ID> \
   --template "DeepFaceLab Desktop" \
+  --ssh \
+  --direct
+```
+
+**Using template hash (more reliable):**
+
+```bash
+vastai create instance <OFFER_ID> \
+  --template_hash <TEMPLATE_HASH> \
   --ssh \
   --direct
 ```
@@ -102,6 +129,8 @@ To find available offers:
 ```bash
 vastai search offers 'geolocation=US gpu_ram>=48' -o dph
 ```
+
+**Note:** If you get an error "invalid template hash or id or template not accessible by user", the template may not exist yet. Make sure to create it first using `vastai create template`, then verify it exists with `vastai search templates`.
 
 ## Create Instance Directly (Alternative)
 
