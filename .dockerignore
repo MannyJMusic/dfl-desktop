@@ -1,0 +1,61 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+doc/
+README*
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Old DeepFaceLab directory (we clone fresh in Dockerfile)
+DeepFaceLab/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Large resources
+*.zip
+*.tar.gz
+*.rar
+
+# Machine Video Editor zip (already extracted)
+machine-video-editor-0.8.2.zip
+

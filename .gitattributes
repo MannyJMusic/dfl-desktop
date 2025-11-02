@@ -1,0 +1,2 @@
+*.npy filter=lfs diff=lfs merge=lfs -text
+machine-video-editor-0.8.2/machine-video-editor filter=lfs diff=lfs merge=lfs -text
