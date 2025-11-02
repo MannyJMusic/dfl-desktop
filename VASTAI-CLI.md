@@ -73,16 +73,18 @@ Create a template with provisioning script. Replace the PROVISIONING_SCRIPT URL 
 vastai create template \
   --name "DeepFaceLab Desktop" \
   --image "mannyj37/dfl-desktop:latest" \
-  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG=localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal" \
+  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1" \
   --disk_space 200
 ```
 
-**Note:** According to the [Vast.ai CLI documentation](https://docs.vast.ai/cli/commands), the `--env` flag accepts Docker options including port mappings with `-p` and environment variables with `-e`. Port mappings must match PORTAL_CONFIG:
+**Note:** According to the [Vast.ai CLI documentation](https://docs.vast.ai/cli/commands), the `--env` flag accepts Docker options including port mappings with `-p` and environment variables with `-e`. Important points:
 
-- `-p 5901:5901`: VNC Desktop (external = internal, uses secure tunnel)
-- `-p 1111:11111`: Instance Portal (external port 1111 proxies to internal port 11111 via Caddy reverse proxy)
-
-When external port ≠ internal port (like `1111:11111`), Caddy reverse proxy makes the application available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal).
+- Port mappings must match PORTAL_CONFIG:
+  - `-p 5901:5901`: VNC Desktop (external = internal, uses secure tunnel)
+  - `-p 1111:11111`: Instance Portal (external port 1111 proxies to internal port 11111 via Caddy reverse proxy)
+- PORTAL_CONFIG must be single-quoted to properly handle the pipe character `|` separator
+- OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN configure the Instance Portal open button behavior
+- When external port ≠ internal port (like `1111:11111`), Caddy reverse proxy makes the application available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal).
 
 ## Create Instance from Template
 
@@ -108,13 +110,18 @@ You can also create an instance directly without a template:
 ```bash
 vastai create instance 25105510 \
   --image "mannyj37/dfl-desktop:latest" \
-  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG=localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal" \
+  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1" \
   --disk 200 \
   --ssh \
   --direct
 ```
 
-**Note:** According to the [Vast.ai CLI documentation](https://docs.vast.ai/cli/commands), the `--env` flag accepts Docker options including port mappings (`-p`) and environment variables (`-e`). PORTAL_CONFIG format is `Interface:ExternalPort:InternalPort:Path:Name`. When external ≠ internal (like `1111:11111`), Caddy reverse proxy makes the app available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal).
+**Note:** According to the [Vast.ai CLI documentation](https://docs.vast.ai/cli/commands):
+
+- The `--env` flag accepts Docker options including port mappings (`-p`) and environment variables (`-e`)
+- PORTAL_CONFIG format is `Interface:ExternalPort:InternalPort:Path:Name` - must be single-quoted to handle the pipe character
+- OPEN_BUTTON_PORT=1111 and OPEN_BUTTON_TOKEN=1 configure the Instance Portal open button
+- When external ≠ internal (like `1111:11111`), Caddy reverse proxy makes the app available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal)
 
 ## Access VNC Desktop
 
