@@ -190,6 +190,10 @@ echo "Configuring Vast.ai Portal..."
 rm -f /etc/portal.yaml
 export PORTAL_CONFIG="localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal"
 
+# Configure Instance Portal open button
+export OPEN_BUTTON_PORT=1111
+export OPEN_BUTTON_TOKEN=1
+
 # Create supervisor script for VNC if needed
 if [ -d "/opt/supervisor-scripts" ]; then
     cat > /opt/supervisor-scripts/vnc.sh << 'EOF'
