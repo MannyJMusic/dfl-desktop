@@ -177,8 +177,35 @@ if ! command -v conda &> /dev/null; then
     conda config --add channels nvidia
 else
     echo "Conda already installed, using existing installation"
-    source "$(conda info --base)/etc/profile.d/conda.sh"
+    # Get conda base path and source it
+    CONDA_BASE=$(conda info --base 2>/dev/null || echo "/opt/miniconda3")
+    if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+        source "${CONDA_BASE}/etc/profile.d/conda.sh"
+    else
+        # Try common locations
+        if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
+            source /opt/miniconda3/etc/profile.d/conda.sh
+        elif [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
+            source /opt/conda/etc/profile.d/conda.sh
+        else
+            echo "Warning: Could not find conda.sh, conda may not work properly"
+        fi
+    fi
 fi
+
+# Verify conda is working
+if ! command -v conda &> /dev/null; then
+    echo "Error: conda command not found after installation"
+    exit 1
+fi
+
+# Ensure conda is initialized for this script
+if ! conda info --envs &> /dev/null; then
+    echo "Error: conda is not properly initialized"
+    exit 1
+fi
+
+echo "Conda initialized successfully"
 
 # Create conda environment with Python 3.10
 # Note: Base image has CUDA 12.6.3 and cuDNN installed system-wide,
@@ -188,17 +215,28 @@ mkdir -p /opt/conda-envs
 
 # Check if environment already exists
 if [ -d "${CONDA_ENV_PATH}" ]; then
-    echo "Conda environment already exists, skipping creation"
-else
+    echo "Conda environment already exists at ${CONDA_ENV_PATH}"
+    echo "Verifying environment..."
+    if [ -f "${CONDA_ENV_PATH}/bin/python" ]; then
+        echo "Environment is valid, using existing installation"
+    else
+        echo "Environment directory exists but is invalid, recreating..."
+        rm -rf ${CONDA_ENV_PATH}
+    fi
+fi
+
+# Create environment if it doesn't exist
+if [ ! -d "${CONDA_ENV_PATH}" ]; then
+    echo "Creating new conda environment at ${CONDA_ENV_PATH}..."
     # Try to create environment with cudatoolkit for TensorFlow compatibility
     # If that fails, create basic Python environment (TensorFlow will use system CUDA)
-    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>/dev/null; then
+    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>&1; then
         echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
         echo "TensorFlow will use system CUDA libraries from the base image."
-        if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge; then
+        if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge 2>&1; then
             echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
-            if [ -f "/workspace/environment.yml" ]; then
-                conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml || {
+            if [ -f "${WORKSPACE_ROOT}/environment.yml" ]; then
+                conda env create -p ${CONDA_ENV_PATH} -f ${WORKSPACE_ROOT}/environment.yml 2>&1 || {
                     echo "Error: All methods to create conda environment failed"
                     exit 1
                 }
@@ -208,10 +246,57 @@ else
             fi
         fi
     fi
+    
+    # Verify environment was created
+    if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
+        echo "Error: Conda environment was not created successfully"
+        exit 1
+    fi
+    
+    echo "Conda environment created successfully at ${CONDA_ENV_PATH}"
 fi
 
 # Activate conda environment
-conda activate ${CONDA_ENV_PATH}
+echo "Activating conda environment: ${CONDA_ENV_PATH}..."
+# Use conda activate with proper path
+if [ -f "${CONDA_ENV_PATH}/bin/activate" ]; then
+    source "${CONDA_ENV_PATH}/bin/activate"
+elif command -v conda &> /dev/null; then
+    conda activate ${CONDA_ENV_PATH}
+else
+    echo "Error: Cannot activate conda environment"
+    exit 1
+fi
+
+# Verify activation worked
+if [ -z "$CONDA_DEFAULT_ENV" ] && [ -z "$VIRTUAL_ENV" ]; then
+    # Try alternative activation method
+    export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
+    echo "Using PATH method to activate environment"
+fi
+
+# Verify Python is available and from the correct environment
+if ! command -v python &> /dev/null; then
+    echo "Error: python command not found after activating environment"
+    exit 1
+fi
+
+# Check Python version and location
+PYTHON_VERSION=$(python --version 2>&1)
+PYTHON_PATH=$(which python)
+echo "Python version: ${PYTHON_VERSION}"
+echo "Python path: ${PYTHON_PATH}"
+echo "Expected path: ${CONDA_ENV_PATH}/bin/python"
+
+# Verify we're using the right Python
+if [[ "$PYTHON_PATH" != *"${CONDA_ENV_PATH}"* ]]; then
+    echo "Warning: Python is not from the conda environment, forcing PATH update"
+    export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
+    PYTHON_PATH=$(which python)
+    echo "Updated Python path: ${PYTHON_PATH}"
+fi
+
+echo "Conda environment activated successfully"
 
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
@@ -263,6 +348,25 @@ if [ -d "${DFL_MVE_PATH}/DeepFaceLab" ]; then
 else
     echo "Error: DeepFaceLab not found in ${DFL_MVE_PATH}/DeepFaceLab"
     exit 1
+fi
+
+# Install DeepFaceLab CUDA requirements from requirement-cuda.txt
+echo "Installing DeepFaceLab CUDA requirements from requirement-cuda.txt..."
+REQUIREMENTS_FILE="${DEEPFACELAB_PATH}/requirement-cuda.txt"
+if [ -f "${REQUIREMENTS_FILE}" ]; then
+    echo "Found requirement-cuda.txt at ${REQUIREMENTS_FILE}"
+    python -m pip install --no-cache-dir -r "${REQUIREMENTS_FILE}"
+    echo "DeepFaceLab CUDA requirements installed successfully"
+else
+    echo "Warning: requirement-cuda.txt not found at ${REQUIREMENTS_FILE}"
+    echo "Trying alternative location: ${DEEPFACELAB_PATH}/DeepFaceLab/requirement-cuda.txt"
+    if [ -f "${DEEPFACELAB_PATH}/DeepFaceLab/requirement-cuda.txt" ]; then
+        python -m pip install --no-cache-dir -r "${DEEPFACELAB_PATH}/DeepFaceLab/requirement-cuda.txt"
+        echo "DeepFaceLab CUDA requirements installed successfully"
+    else
+        echo "Warning: requirement-cuda.txt not found in alternative location either"
+        echo "Continuing without CUDA-specific requirements..."
+    fi
 fi
 
 # Set up workspace - symlink to mounted volume

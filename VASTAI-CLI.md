@@ -1,5 +1,17 @@
 # VAST-AI CLI Cheatsheet
 
+## Frequently Used Commands
+
+### Quick Start: Create Instance with Base Image
+
+Most frequently used command to create an instance with the Vast.ai base image and provisioning script:
+
+```bash
+vastai create instance 25076231 --image vastai/base-image:@vastai-automatic-tag --env '-p 1111:1111 -p 6006:6006 -p 8080:8080 -p 8384:8384 -p 72299:72299 -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1 -e JUPYTER_DIR=/ -e DATA_DIRECTORY=/workspace/ -e PORTAL_CONFIG="localhost:1111:11111:/:Instance Portal|localhost:8080:18080:/:Jupyter|localhost:8080:8080:/terminals/1:Jupyter Terminal|localhost:8384:18384:/:Syncthing|localhost:6006:16006:/:Tensorboard" -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh' --onstart-cmd 'entrypoint.sh --sync-environment' --disk 32 --create-volume 25076233 --volume-size 30 --mount-path '/data/workspace' --jupyter --ssh --direct
+```
+
+**Note:** Replace `25105506` with your offer ID and `25105512` with your volume ask ID.
+
 ## Search for GPU Offers
 
 Search for GPU offers with specific criteria:
