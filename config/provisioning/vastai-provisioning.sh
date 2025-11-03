@@ -46,6 +46,8 @@ apt-get update && \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    xfce4 \
+    xfce4-goodies \
     openssh-server \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
