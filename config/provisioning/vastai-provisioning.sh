@@ -15,7 +15,8 @@ cd /workspace/
 
 echo "=== Starting DeepFaceLab Provisioning ==="
 
-# Install system dependencies
+# Install system dependencies needed for DeepFaceLab
+# Vast.ai base image has minimal packages, so we install what we need
 echo "Installing system dependencies..."
 apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -45,62 +46,48 @@ apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure SSH server (skip if already running)
-if pgrep -x sshd > /dev/null 2>&1 || ss -tlnp 2>/dev/null | grep -q "sshd"; then
-    echo "SSH server already running - skipping SSH configuration"
-else
-    echo "Configuring SSH server..."
-    mkdir -p /var/run/sshd
-    mkdir -p /root/.ssh
-    # Ensure /run/sshd exists with correct ownership/permissions (Ubuntu expects this path)
-    mkdir -p /run/sshd
-    chown root:root /run/sshd
-    chmod 755 /run/sshd
+# Configure SSH server
+echo "Configuring SSH server..."
+mkdir -p /var/run/sshd /root/.ssh /run/sshd
+chown root:root /run/sshd
+chmod 755 /run/sshd
 
-    # Configure SSH for container use (allow root login, etc.)
-    SSH_CONFIG_FILE="/etc/ssh/sshd_config"
-    if [ -f "$SSH_CONFIG_FILE" ]; then
-        # Enable root login (needed for containers)
-        sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-        sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-        echo "PermitRootLogin yes" >> "$SSH_CONFIG_FILE"
-        
-        # Allow password authentication (for Vast.ai SSH key injection)
-        sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-        sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-        echo "PasswordAuthentication yes" >> "$SSH_CONFIG_FILE"
-        
-        # Ensure PubkeyAuthentication is enabled (for Vast.ai SSH keys)
-        grep -q "^PubkeyAuthentication" "$SSH_CONFIG_FILE" || echo "PubkeyAuthentication yes" >> "$SSH_CONFIG_FILE"
-        
-        # Disable strict mode checking (helps in container environments)
-        sed -i 's/#StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-        sed -i 's/StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null
-    fi
-
-    # Generate host keys if they don't exist (required for SSH server)
-    if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
-        echo "Generating SSH host keys..."
-        ssh-keygen -A
-    fi
-
-    # Start SSH service (Vast.ai base image should manage service lifecycle, but ensure it's available)
-    if command -v service &> /dev/null; then
-        service ssh start || service sshd start || true
-    elif command -v systemctl &> /dev/null; then
-        systemctl enable ssh || systemctl enable sshd || true
-        systemctl start ssh || systemctl start sshd || true
-    else
-        # Manual start if service/systemctl not available (run in background)
-        if [ -f /usr/sbin/sshd ]; then
-            /usr/sbin/sshd &
-        elif [ -f /usr/bin/sshd ]; then
-            /usr/bin/sshd &
-        fi
-    fi
-
-    echo "SSH server configured and started"
+# Configure SSH for container use
+SSH_CONFIG_FILE="/etc/ssh/sshd_config"
+if [ -f "$SSH_CONFIG_FILE" ]; then
+    # Enable root login (needed for containers)
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    echo "PermitRootLogin yes" >> "$SSH_CONFIG_FILE"
+    
+    # Allow password authentication
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    echo "PasswordAuthentication yes" >> "$SSH_CONFIG_FILE"
+    
+    # Ensure PubkeyAuthentication is enabled
+    grep -q "^PubkeyAuthentication" "$SSH_CONFIG_FILE" || echo "PubkeyAuthentication yes" >> "$SSH_CONFIG_FILE"
+    
+    # Disable strict mode checking
+    sed -i 's/#StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    sed -i 's/StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null
 fi
+
+# Generate host keys if they don't exist
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+    echo "Generating SSH host keys..."
+    ssh-keygen -A
+fi
+
+# Start SSH service
+if command -v service &> /dev/null; then
+    service ssh start || service sshd start || true
+elif [ -f /usr/sbin/sshd ]; then
+    /usr/sbin/sshd &
+elif [ -f /usr/bin/sshd ]; then
+    /usr/bin/sshd &
+fi
+echo "SSH server configured and started"
 
 # Fix cron crash loop issue early (Vast.ai base image tries to manage cron but it conflicts with system cron)
 # This must be done early to prevent log spam and potential service conflicts
@@ -164,7 +151,7 @@ fi
 
 echo "Cron crash loop fixed"
 
-# Install Miniconda if not present
+# Install Miniconda if not present (Vast.ai base image may or may not have it)
 if ! command -v conda &> /dev/null; then
     echo "Installing Miniconda..."
     MINICONDA_VERSION="Miniforge3-Linux-x86_64"
@@ -187,26 +174,31 @@ else
 fi
 
 # Create conda environment with Python 3.10
-# Note: Base image already has CUDA 12.6.3 and cuDNN installed system-wide,
-# so we don't need to install them via conda. TensorFlow will use system CUDA libraries.
+# Note: Base image has CUDA 12.6.3 and cuDNN installed system-wide,
+# so TensorFlow will use system CUDA libraries.
 echo "Creating conda environment: ${CONDA_ENV_NAME}..."
 mkdir -p /opt/conda-envs
 
-# Try to create environment with cudatoolkit for TensorFlow compatibility
-# If that fails, create basic Python environment (TensorFlow will use system CUDA)
-if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>/dev/null; then
-    echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
-    echo "TensorFlow will use system CUDA libraries from the base image."
-    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge; then
-        echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
-        if [ -f "/workspace/environment.yml" ]; then
-            conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml || {
-                echo "Error: All methods to create conda environment failed"
+# Check if environment already exists
+if [ -d "${CONDA_ENV_PATH}" ]; then
+    echo "Conda environment already exists, skipping creation"
+else
+    # Try to create environment with cudatoolkit for TensorFlow compatibility
+    # If that fails, create basic Python environment (TensorFlow will use system CUDA)
+    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>/dev/null; then
+        echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
+        echo "TensorFlow will use system CUDA libraries from the base image."
+        if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge; then
+            echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
+            if [ -f "/workspace/environment.yml" ]; then
+                conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml || {
+                    echo "Error: All methods to create conda environment failed"
+                    exit 1
+                }
+            else
+                echo "Error: Cannot create conda environment and no environment.yml found"
                 exit 1
-            }
-        else
-            echo "Error: Cannot create conda environment and no environment.yml found"
-            exit 1
+            fi
         fi
     fi
 fi
@@ -254,14 +246,34 @@ fi
 
 # Create workspace directories
 echo "Creating workspace directories..."
-mkdir -p ${DEEPFACELAB_PATH}/workspace
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned_debug
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned_debug
-mkdir -p ${DEEPFACELAB_PATH}/workspace/model
+# Check if /workspace is a mount point (from Vast.ai volume)
+if mountpoint -q /workspace 2>/dev/null || (df /workspace 2>/dev/null | grep -q "^/dev" 2>/dev/null); then
+    echo "Detected /workspace as volume mount point, using it for DeepFaceLab workspace"
+    # Ensure /workspace exists
+    mkdir -p /workspace
+    # Create symlink from /opt/DFL-MVE/DeepFaceLab/workspace to /workspace
+    rm -rf ${DEEPFACELAB_PATH}/workspace 2>/dev/null || true
+    mkdir -p ${DEEPFACELAB_PATH}
+    ln -sf /workspace ${DEEPFACELAB_PATH}/workspace
+    # Create workspace subdirectories in /workspace
+    mkdir -p /workspace/data_src
+    mkdir -p /workspace/data_src/aligned
+    mkdir -p /workspace/data_src/aligned_debug
+    mkdir -p /workspace/data_dst
+    mkdir -p /workspace/data_dst/aligned
+    mkdir -p /workspace/data_dst/aligned_debug
+    mkdir -p /workspace/model
+else
+    echo "Creating workspace in /opt/DFL-MVE/DeepFaceLab/workspace"
+    mkdir -p ${DEEPFACELAB_PATH}/workspace
+    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src
+    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned
+    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned_debug
+    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst
+    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned
+    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned_debug
+    mkdir -p ${DEEPFACELAB_PATH}/workspace/model
+fi
 
 # Copy runtime scripts if they exist in workspace, otherwise create placeholder
 echo "Setting up runtime scripts..."
@@ -294,12 +306,6 @@ mkdir -p ${VNC_HOME}/.vnc
 
 # Use VNC_PASSWORD environment variable if set, otherwise default to "deepfacelab"
 VNC_PASSWORD="${VNC_PASSWORD:-deepfacelab}"
-
-# Ensure tigervnc-tools is installed (should already be in Dockerfile, but verify)
-if ! command -v vncpasswd &> /dev/null && ! command -v tigervncpasswd &> /dev/null; then
-    echo "Installing tigervnc-tools..."
-    apt-get update && apt-get install -y --no-install-recommends tigervnc-tools && apt-get clean && rm -rf /var/lib/apt/lists/*
-fi
 
 # Find vncpasswd command (could be vncpasswd or tigervncpasswd)
 VNCPASSWD_CMD=$(command -v vncpasswd || command -v tigervncpasswd || echo "vncpasswd")
@@ -343,10 +349,10 @@ fi
 EOF
 
 chmod +x ${VNC_HOME}/.vnc/xstartup
+echo "VNC xstartup script created"
 
-# Start VNC server in background
-echo "Starting VNC server..."
-vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
+# Note: VNC server can be started manually with: vncserver :1 -geometry 1920x1080 -depth 24
+# Or automatically by supervisor if supervisor scripts are configured
 
 # Set up PORTAL_CONFIG for Vast.ai Instance Portal
 # VNC typically runs on port 5901, mapping to external port
@@ -411,50 +417,7 @@ EOF
 export OPEN_BUTTON_PORT
 export OPEN_BUTTON_TOKEN
 
-# Create supervisor scripts if supervisor directory exists
-if [ -d "/opt/supervisor-scripts" ]; then
-    # Supervisor script for VNC
-    cat > /opt/supervisor-scripts/vnc.sh << 'EOF'
-#!/bin/bash
-# Keep VNC server running
-while true; do
-    if ! pgrep -f "vncserver :1" > /dev/null; then
-        vncserver :1 -geometry 1920x1080 -depth 24
-    fi
-    sleep 30
-done
-EOF
-    chmod +x /opt/supervisor-scripts/vnc.sh
-    
-    # Supervisor script for SSH
-    cat > /opt/supervisor-scripts/ssh.sh << 'EOF'
-#!/bin/bash
-# Keep SSH server running
-while true; do
-    if ! pgrep -f "sshd" > /dev/null; then
-        if command -v service &> /dev/null; then
-            service ssh start || service sshd start || true
-        elif command -v systemctl &> /dev/null; then
-            systemctl start ssh || systemctl start sshd || true
-        elif [ -f /usr/sbin/sshd ]; then
-            /usr/sbin/sshd &
-        elif [ -f /usr/bin/sshd ]; then
-            /usr/bin/sshd &
-        fi
-    fi
-    sleep 60
-done
-EOF
-    chmod +x /opt/supervisor-scripts/ssh.sh
-fi
-
-# Ensure cron is properly stopped (duplicate check in case supervisor restarted it)
-# This is a final safeguard after creating supervisor scripts
-if command -v supervisorctl &> /dev/null; then
-    supervisorctl stop cron 2>/dev/null || true
-    supervisorctl remove cron 2>/dev/null || true
-    # Don't reload here as it might restart cron - just ensure it's stopped
-fi
+# Supervisor scripts not needed - services are managed by the image startup script
 
 # Create environment setup script
 cat > /opt/setup-dfl-env.sh << EOF
@@ -479,5 +442,5 @@ echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
 echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
 echo "Conda environment: ${CONDA_ENV_PATH}"
 echo "To activate: source /opt/setup-dfl-env.sh"
-echo "VNC server should be running on :1"
+echo "VNC server can be started manually with: vncserver :1 -geometry 1920x1080 -depth 24"
 

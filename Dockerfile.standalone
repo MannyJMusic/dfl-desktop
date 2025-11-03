@@ -64,8 +64,8 @@ RUN mkdir -p /root/.vnc && \
     printf "startxfce4 &\n" >> /root/.vnc/xstartup && \
     chmod +x /root/.vnc/xstartup
 
-# Startup script: start SSH and VNC
-RUN printf "#!/usr/bin/env bash\nset -e\n\nmkdir -p /run/sshd /root/.vnc /workspace\n\n# Idempotent fetch of DFL Desktop sources into persistent workspace\nif ! [ -d /workspace/DFL-Desktop ]; then\n  echo '[startup] fetching DFL Desktop sources...'\n  git clone --depth 1 https://github.com/MannyJMusic/DFL-MVE.git /workspace/DFL-Desktop || true\n  ln -sf /workspace/DFL-Desktop /opt/DFL-Desktop 2>/dev/null || true\nfi\n\n# Ensure VNC password exists\nif ! [ -f /root/.vnc/passwd ]; then\n  echo \"${VNC_PASSWORD}\" | (vncpasswd -f || tigervncpasswd -f) > /root/.vnc/passwd\n  chmod 600 /root/.vnc/passwd\nfi\n\n# Start SSH and VNC\nservice ssh start\n# Start VNC on :1\nvncserver :1 -geometry 1920x1080 -depth 24 || true\n\n# Keep running\ntail -f /var/log/auth.log /tmp/vnc* 2>/dev/null || tail -f /dev/null\n" > /usr/local/bin/startup.sh && \
+# Startup script: start SSH only (VNC can be started manually if needed)
+RUN printf "#!/usr/bin/env bash\nset -e\n\nmkdir -p /run/sshd /root/.vnc /workspace\n\n# Idempotent fetch of DFL Desktop sources into persistent workspace\nif ! [ -d /workspace/DFL-Desktop ]; then\n  echo '[startup] fetching DFL Desktop sources...'\n  git clone --depth 1 https://github.com/MannyJMusic/DFL-MVE.git /workspace/DFL-Desktop || true\n  ln -sf /workspace/DFL-Desktop /opt/DFL-Desktop 2>/dev/null || true\nfi\n\n# Ensure VNC password exists (for manual VNC startup)\nif ! [ -f /root/.vnc/passwd ]; then\n  echo \"${VNC_PASSWORD}\" | (vncpasswd -f || tigervncpasswd -f) > /root/.vnc/passwd\n  chmod 600 /root/.vnc/passwd\nfi\n\n# Start SSH only\nservice ssh start\n\necho '[startup] SSH started. VNC can be started manually with: vncserver :1 -geometry 1920x1080 -depth 24'\n\n# Keep running\ntail -f /var/log/auth.log 2>/dev/null || tail -f /dev/null\n" > /usr/local/bin/startup.sh && \
     chmod +x /usr/local/bin/startup.sh
 
 # Activate environment on login

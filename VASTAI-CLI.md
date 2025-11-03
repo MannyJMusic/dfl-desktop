@@ -74,8 +74,10 @@ vastai create template \
   --name "DeepFaceLab Desktop" \
   --image "mannyj37/dfl-desktop:latest" \
   --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh" \
-  --disk_space 200
+  --disk_space 50
 ```
+
+**Note:** Don't include volume mounts (`-v`) in templates - volumes are machine-specific and must be attached when creating instances.
 
 **Note:** According to the [Vast.ai Advanced Setup documentation](https://docs.vast.ai/documentation/templates/advanced-setup):
 
@@ -101,11 +103,169 @@ To search specifically for your template:
 vastai search templates --raw | grep -i "DeepFaceLab"
 ```
 
-## Create Instance from Template
+## Create Volume (200GB for Workspace)
 
-After creating the template and verifying it exists, create an instance from it using either the template name or the template hash:
+### Method 1: Create Volume When Creating an Instance
 
-**Using template name:**
+You can create a volume during instance creation:
+
+```bash
+# First, search for volume offers
+vastai search volumes
+
+# Then create instance with volume creation
+vastai create instance <OFFER_ID> \
+  --image <IMAGE> \
+  --create-volume <VOLUME_ASK_ID> \
+  --volume-size 200 \
+  --volume-label dfl_ws \
+  --mount-path /workspace \
+  --ssh \
+  --direct
+```
+
+### Method 2: Create Volume Separately (If Supported)
+
+Some machines allow standalone volume creation, but typically volumes are created when creating instances.
+
+**Important:**
+
+- Use `--create-volume <VOLUME_ASK_ID>` to create a new volume (get ID from `vastai search volumes`)
+- Use `--link-volume <VOLUME_ID>` to link an existing volume (get ID from `vastai show volumes`)
+- `--mount-path` specifies where the volume appears inside the container - use simple paths like `/workspace` or `/mnt` (Vast.ai doesn't allow deep nested paths)
+- `--volume-size` is in GB (default 15GB if not specified)
+- `--volume-label` is an optional name for the volume
+
+## Complete Workflow: Create Template + Volume + Instance
+
+Here's the complete workflow to create a template with 50GB container storage and 200GB volume:
+
+### Step 1: Create Template (No Volume)
+
+```bash
+vastai create template \
+  --name "DFL Desktop 50/200" \
+  --image "mannyj37/dfl-desktop:latest" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh" \
+  --disk_space 50
+```
+
+### Step 2: Find Suitable Offer
+
+```bash
+# Search for offers with enough disk space (50GB container + 200GB volume = 250GB minimum)
+vastai search offers 'geolocation=US gpu_ram>=48 disk_space>=260' -o dph
+```
+
+### Step 3: Get Existing Volume ID (or Create New Volume)
+
+#### Option A: Link an Existing Volume
+
+First, get your volume ID from `vastai show volumes`:
+
+```bash
+# List all your volumes to find the volume ID
+vastai show volumes
+```
+
+You'll see output like:
+
+```text
+ID      NAME    SIZE    MACHINE_ID    STATUS
+27535359 dfl_ws  200GB   12345        ready
+```
+
+#### Option B: Create a New Volume
+
+If you need to create a new volume:
+
+```bash
+# Search for volume offers on the machine
+vastai search volumes
+
+# Create a volume (using VOLUME_ASK_ID from search results)
+vastai create instance <OFFER_ID> \
+  --image <IMAGE> \
+  --create-volume <VOLUME_ASK_ID> \
+  --volume-size 200 \
+  --volume-label dfl_ws \
+  --mount-path /workspace
+```
+
+### Step 4: Create Instance from Template with Existing Volume
+
+**Using template name with existing volume:**
+
+```bash
+vastai create instance <OFFER_ID> \
+  --template "DFL Desktop 50/200" \
+  --link-volume 27535359 \
+  --mount-path /workspace \
+  --ssh \
+  --direct
+```
+
+**Using template hash with existing volume:**
+
+```bash
+# First get template hash
+vastai search templates --raw | grep -i "DFL Desktop"
+
+# Then create instance with linked volume
+vastai create instance <OFFER_ID> \
+  --template_hash <TEMPLATE_HASH> \
+  --link-volume 27535359 \
+  --mount-path /workspace \
+  --ssh \
+  --direct
+```
+
+**Important Notes:**
+
+- `--link-volume <VOLUME_ID>` links an existing volume to the instance (get ID from `vastai show volumes`)
+- `--mount-path /workspace` mounts the volume at `/workspace` inside the container (Vast.ai requires simple paths)
+- The provisioning script will automatically use `/workspace` for persistent storage
+- The volume must exist and be accessible before creating the instance
+- Use `--create-volume` instead of `--link-volume` if you want to create a new volume during instance creation
+
+## Check Volume Status
+
+To list your volumes:
+
+```bash
+# List all your volumes (shows volume IDs, names, sizes, machine IDs, and status)
+vastai show volumes
+```
+
+**Example output:**
+
+```text
+ID      NAME    SIZE    MACHINE_ID    STATUS
+27535359 dfl_ws  200GB   12345        ready
+```
+
+**Important:**
+
+- Get the volume ID from this list to use with `--link-volume`
+- Volumes are attached at instance creation time using `--link-volume <VOLUME_ID>` and `--mount-path <PATH>`
+- You cannot attach volumes to existing instances - you must recreate the instance with the volume flags
+
+## Verify Volume is Attached
+
+To check if a volume is attached to your instance:
+
+```bash
+# SSH into the instance
+$(vastai ssh-url <INSTANCE_ID>)
+
+# Check if volume is mounted
+df -h | grep workspace
+ls -la /opt/DFL-MVE/DeepFaceLab/workspace
+```
+
+## Create Instance from Template (without Volume)
+
+If you don't need a volume or want to attach it later:
 
 ```bash
 vastai create instance <OFFER_ID> \
@@ -114,32 +274,48 @@ vastai create instance <OFFER_ID> \
   --direct
 ```
 
-**Using template hash (more reliable):**
-
-```bash
-vastai create instance <OFFER_ID> \
-  --template_hash <TEMPLATE_HASH> \
-  --ssh \
-  --direct
-```
-
-To find available offers:
-
-```bash
-vastai search offers 'geolocation=US gpu_ram>=48' -o dph
-```
-
 **Note:** If you get an error "invalid template hash or id or template not accessible by user", the template may not exist yet. Make sure to create it first using `vastai create template`, then verify it exists with `vastai search templates`.
 
 ## Create Instance Directly (Alternative)
 
 You can also create an instance directly without a template:
 
+**With existing volume (linking volume ID 27535359 as example):**
+
 ```bash
-vastai create instance 25105506 \
+vastai create instance <OFFER_ID> \
   --image "mannyj37/dfl-desktop:latest" \
   --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab" \
-  --disk 200 \
+  --link-volume 27535359 \
+  --mount-path /workspace \
+  --disk 50 \
+  --ssh \
+  --direct
+```
+
+**With new volume creation:**
+
+```bash
+# First: vastai search volumes to get VOLUME_ASK_ID
+vastai create instance <OFFER_ID> \
+  --image "mannyj37/dfl-desktop:latest" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab" \
+  --create-volume <VOLUME_ASK_ID> \
+  --volume-size 200 \
+  --volume-label dfl_ws \
+  --mount-path /workspace \
+  --disk 50 \
+  --ssh \
+  --direct
+```
+
+**Without volume:**
+
+```bash
+vastai create instance <OFFER_ID> \
+  --image "mannyj37/dfl-desktop:latest" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab" \
+  --disk 50 \
   --ssh \
   --direct
 ```
