@@ -278,28 +278,37 @@ export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
 
 # Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
 # 1. /etc/environment (for system-wide environment variables)
-if ! grep -q "^PORTAL_CONFIG=" /etc/environment 2>/dev/null; then
-    echo "PORTAL_CONFIG=\"$PORTAL_CONFIG_VALUE\"" >> /etc/environment
+#    Use a safe replace that doesn't break on '|' or '/' in values
+TMP_ENV_FILE=$(mktemp)
+if [ -f /etc/environment ]; then
+    grep -v '^PORTAL_CONFIG=' /etc/environment > "$TMP_ENV_FILE" || true
 else
-    # Update existing entry
-    sed -i "s|^PORTAL_CONFIG=.*|PORTAL_CONFIG=\"$PORTAL_CONFIG_VALUE\"|" /etc/environment
+    : > "$TMP_ENV_FILE"
 fi
+printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
+mv "$TMP_ENV_FILE" /etc/environment
 
 # 2. Ensure OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN are set
 OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-1111}"
 OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
 
-if ! grep -q "^OPEN_BUTTON_PORT=" /etc/environment 2>/dev/null; then
-    echo "OPEN_BUTTON_PORT=$OPEN_BUTTON_PORT" >> /etc/environment
+TMP_ENV_FILE=$(mktemp)
+if [ -f /etc/environment ]; then
+    grep -v '^OPEN_BUTTON_PORT=' /etc/environment > "$TMP_ENV_FILE" || true
 else
-    sed -i "s|^OPEN_BUTTON_PORT=.*|OPEN_BUTTON_PORT=$OPEN_BUTTON_PORT|" /etc/environment
+    : > "$TMP_ENV_FILE"
 fi
+printf 'OPEN_BUTTON_PORT=%s\n' "$OPEN_BUTTON_PORT" >> "$TMP_ENV_FILE"
+mv "$TMP_ENV_FILE" /etc/environment
 
-if ! grep -q "^OPEN_BUTTON_TOKEN=" /etc/environment 2>/dev/null; then
-    echo "OPEN_BUTTON_TOKEN=$OPEN_BUTTON_TOKEN" >> /etc/environment
+TMP_ENV_FILE=$(mktemp)
+if [ -f /etc/environment ]; then
+    grep -v '^OPEN_BUTTON_TOKEN=' /etc/environment > "$TMP_ENV_FILE" || true
 else
-    sed -i "s|^OPEN_BUTTON_TOKEN=.*|OPEN_BUTTON_TOKEN=$OPEN_BUTTON_TOKEN|" /etc/environment
+    : > "$TMP_ENV_FILE"
 fi
+printf 'OPEN_BUTTON_TOKEN=%s\n' "$OPEN_BUTTON_TOKEN" >> "$TMP_ENV_FILE"
+mv "$TMP_ENV_FILE" /etc/environment
 
 # 3. Create portal.yaml file (Vast.ai base image may read this)
 # Note: Vast.ai primarily uses PORTAL_CONFIG env var, but portal.yaml provides backup
