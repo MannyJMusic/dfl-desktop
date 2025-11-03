@@ -32,15 +32,30 @@ EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
 PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-localhost:${EXTERNAL_VNC_PORT}:5901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal}"
 export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
 
-# Persist to /etc/environment (safe rewrite)
+# Determine OPEN_BUTTON settings (prefer values from Vast if present)
+OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-$EXTERNAL_PORTAL_PORT}"
+OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-${JUPYTER_TOKEN:-1}}"
+
+# Persist to /etc/environment (safe rewrite for all three keys)
 TMP_ENV_FILE=$(mktemp)
-[ -f /etc/environment ] && grep -v '^PORTAL_CONFIG=' /etc/environment > "$TMP_ENV_FILE" || : > "$TMP_ENV_FILE"
-printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
-grep -v '^OPEN_BUTTON_PORT=' "$TMP_ENV_FILE" > "${TMP_ENV_FILE}.2" || true
-mv "${TMP_ENV_FILE}.2" "$TMP_ENV_FILE"
-printf 'OPEN_BUTTON_PORT=%s\n' "$EXTERNAL_PORTAL_PORT" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
-log "PORTAL_CONFIG set to: $PORTAL_CONFIG_VALUE"
+[ -f /etc/environment ] && cat /etc/environment > "$TMP_ENV_FILE" || : > "$TMP_ENV_FILE"
+grep -v '^PORTAL_CONFIG=' "$TMP_ENV_FILE" > "${TMP_ENV_FILE}.1" || true
+printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "${TMP_ENV_FILE}.1"
+grep -v '^OPEN_BUTTON_PORT=' "${TMP_ENV_FILE}.1" > "${TMP_ENV_FILE}.2" || true
+printf 'OPEN_BUTTON_PORT=%s\n' "$OPEN_BUTTON_PORT" >> "${TMP_ENV_FILE}.2"
+grep -v '^OPEN_BUTTON_TOKEN=' "${TMP_ENV_FILE}.2" > "${TMP_ENV_FILE}.3" || true
+printf 'OPEN_BUTTON_TOKEN=%s\n' "$OPEN_BUTTON_TOKEN" >> "${TMP_ENV_FILE}.3"
+mv "${TMP_ENV_FILE}.3" /etc/environment
+
+# Export for current process as well
+export OPEN_BUTTON_PORT OPEN_BUTTON_TOKEN
+log "PORTAL_CONFIG set to: $PORTAL_CONFIG_VALUE (OPEN_BUTTON_PORT=${OPEN_BUTTON_PORT})"
+
+# Optional: write backup portal.yaml that some base images read
+cat > /etc/portal.yaml <<EOF
+# Format: Interface:ExternalPort:InternalPort:Path:Name
+${PORTAL_CONFIG_VALUE}
+EOF
 
 # 3) Conda install if missing
 if ! command -v conda >/dev/null 2>&1; then
