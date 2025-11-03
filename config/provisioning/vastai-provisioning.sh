@@ -249,23 +249,23 @@ fi
 
 # Create workspace directories
 echo "Creating workspace directories..."
-# Check if /workspace is a mount point (from Vast.ai volume)
-if mountpoint -q /workspace 2>/dev/null || (df /workspace 2>/dev/null | grep -q "^/dev" 2>/dev/null); then
-    echo "Detected /workspace as volume mount point, using it for DeepFaceLab workspace"
-    # Ensure /workspace exists
-    mkdir -p /workspace
-    # Create symlink from /opt/DFL-MVE/DeepFaceLab/workspace to /workspace
+# Check if workspace root is a mount point (from Vast.ai volume)
+if mountpoint -q ${WORKSPACE_ROOT} 2>/dev/null || (df ${WORKSPACE_ROOT} 2>/dev/null | grep -q "^/dev" 2>/dev/null); then
+    echo "Detected ${WORKSPACE_ROOT} as volume mount point, using it for DeepFaceLab workspace"
+    # Ensure workspace root exists
+    mkdir -p ${WORKSPACE_ROOT}
+    # Create symlink from /opt/DFL-MVE/DeepFaceLab/workspace to workspace root
     rm -rf ${DEEPFACELAB_PATH}/workspace 2>/dev/null || true
     mkdir -p ${DEEPFACELAB_PATH}
-    ln -sf /workspace ${DEEPFACELAB_PATH}/workspace
-    # Create workspace subdirectories in /workspace
-    mkdir -p /workspace/data_src
-    mkdir -p /workspace/data_src/aligned
-    mkdir -p /workspace/data_src/aligned_debug
-    mkdir -p /workspace/data_dst
-    mkdir -p /workspace/data_dst/aligned
-    mkdir -p /workspace/data_dst/aligned_debug
-    mkdir -p /workspace/model
+    ln -sf ${WORKSPACE_ROOT} ${DEEPFACELAB_PATH}/workspace
+    # Create workspace subdirectories in workspace root
+    mkdir -p ${WORKSPACE_ROOT}/data_src
+    mkdir -p ${WORKSPACE_ROOT}/data_src/aligned
+    mkdir -p ${WORKSPACE_ROOT}/data_src/aligned_debug
+    mkdir -p ${WORKSPACE_ROOT}/data_dst
+    mkdir -p ${WORKSPACE_ROOT}/data_dst/aligned
+    mkdir -p ${WORKSPACE_ROOT}/data_dst/aligned_debug
+    mkdir -p ${WORKSPACE_ROOT}/model
 else
     echo "Creating workspace in /opt/DFL-MVE/DeepFaceLab/workspace"
     mkdir -p ${DEEPFACELAB_PATH}/workspace
@@ -280,25 +280,27 @@ fi
 
 # Copy runtime scripts if they exist in workspace, otherwise create placeholder
 echo "Setting up runtime scripts..."
-if [ -d "/workspace/scripts" ]; then
-    cp -r /workspace/scripts ${DEEPFACELAB_PATH}/scripts
+if [ -d "${WORKSPACE_ROOT}/scripts" ]; then
+    cp -r ${WORKSPACE_ROOT}/scripts ${DEEPFACELAB_PATH}/scripts
     chmod +x ${DEEPFACELAB_PATH}/scripts/*.sh
+    echo "Runtime scripts copied from ${WORKSPACE_ROOT}/scripts"
 else
-    echo "Warning: Runtime scripts not found in /workspace/scripts"
+    echo "Warning: Runtime scripts not found in ${WORKSPACE_ROOT}/scripts"
     mkdir -p ${DEEPFACELAB_PATH}/scripts
 fi
 
 # Set up Machine Video Editor
 echo "Setting up Machine Video Editor..."
 mkdir -p ${MVE_PATH}
-# Note: Machine Video Editor should be available in /workspace/machine-video-editor-0.8.2/
+# Note: Machine Video Editor should be available in workspace/machine-video-editor-0.8.2/
 # or downloaded from a URL. Adjust this section based on your MVE source.
-if [ -d "/workspace/machine-video-editor-0.8.2" ]; then
-    cp -r /workspace/machine-video-editor-0.8.2/* ${MVE_PATH}/
+if [ -d "${WORKSPACE_ROOT}/machine-video-editor-0.8.2" ]; then
+    cp -r ${WORKSPACE_ROOT}/machine-video-editor-0.8.2/* ${MVE_PATH}/
     chmod +x ${MVE_PATH}/machine-video-editor 2>/dev/null || true
     ln -sf ${MVE_PATH}/machine-video-editor /usr/local/bin/machine-video-editor 2>/dev/null || true
+    echo "Machine Video Editor copied from ${WORKSPACE_ROOT}/machine-video-editor-0.8.2/"
 else
-    echo "Warning: Machine Video Editor not found in /workspace/machine-video-editor-0.8.2/"
+    echo "Warning: Machine Video Editor not found in ${WORKSPACE_ROOT}/machine-video-editor-0.8.2/"
     echo "You may need to upload it or configure download URL"
 fi
 
