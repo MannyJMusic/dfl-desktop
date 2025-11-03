@@ -50,3 +50,21 @@ RUN chmod -R +x /opt/provisioning/*.sh || true
 # - Set up Machine Video Editor
 # - Configure VNC server
 # - Set up workspace directories
+
+
+# First, search for volume offers
+vastai search volumes
+
+# Then create instance with volume creation
+vastai create instance 17950264  \
+  --image "vastai/base-image:cuda-12.6.3-cudnn-devel-ubuntu22.04-py313" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh" \
+  --create-volume 20282819 \
+  --volume-size 200 \
+  --volume-label dfl_ws \
+  --mount-path /workspace \
+  --disk 50 \
+  --ssh \
+  --direct
+
+  vastai create instance 25105506 --image vastai/base-image:@vastai-automatic-tag --env '-p 1111:1111 -p 6006:6006 -p 8080:8080 -p 8384:8384 -p 72299:72299 -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1 -e JUPYTER_DIR=/ -e DATA_DIRECTORY=/workspace/ -e PORTAL_CONFIG="localhost:1111:11111:/:Instance Portal|localhost:8080:18080:/:Jupyter|localhost:8080:8080:/terminals/1:Jupyter Terminal|localhost:8384:18384:/:Syncthing|localhost:6006:16006:/:Tensorboard"' --onstart-cmd 'entrypoint.sh --sync-environment' --disk 32 --create-volume 25105512 --volume-size 30 --mount-path '/data/workspace' --jupyter --ssh --direct

@@ -10,8 +10,20 @@ export MVE_PATH=/opt/MachineVideoEditor
 export CONDA_ENV_NAME=deepfacelab
 export CONDA_ENV_PATH=/opt/conda-envs/${CONDA_ENV_NAME}
 
-# Change to workspace for persistence
-cd /workspace/
+# Change to workspace for persistence (support both /workspace and /data/workspace)
+if [ -d "/data/workspace" ]; then
+    cd /data/workspace/
+    WORKSPACE_ROOT="/data/workspace"
+elif [ -d "/workspace" ]; then
+    cd /workspace/
+    WORKSPACE_ROOT="/workspace"
+else
+    # Create workspace if it doesn't exist
+    mkdir -p /workspace
+    cd /workspace/
+    WORKSPACE_ROOT="/workspace"
+fi
+export WORKSPACE_ROOT
 
 echo "=== Starting DeepFaceLab Provisioning ==="
 
