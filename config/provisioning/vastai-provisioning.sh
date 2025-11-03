@@ -324,9 +324,24 @@ EOF
     chmod +x /opt/supervisor-scripts/ssh.sh
 fi
 
-# Reload supervisor if it exists
+# Fix cron crash loop issue (Vast.ai base image tries to manage cron but it conflicts)
+# Stop the supervisor-managed cron service if it exists
 if command -v supervisorctl &> /dev/null; then
+    # Stop cron service to prevent crash loop (system cron is already running)
+    supervisorctl stop cron 2>/dev/null || true
+    supervisorctl remove cron 2>/dev/null || true
+    # Reload supervisor config
     supervisorctl reload || true
+fi
+
+# Ensure system cron can run properly by cleaning up any stale lock files
+if [ -f /var/run/crond.pid ]; then
+    # Check if the PID in the lock file is actually running
+    LOCK_PID=$(cat /var/run/crond.pid 2>/dev/null || echo "")
+    if [ -n "$LOCK_PID" ] && ! ps -p "$LOCK_PID" > /dev/null 2>&1; then
+        echo "Cleaning up stale cron lock file"
+        rm -f /var/run/crond.pid
+    fi
 fi
 
 # Create environment setup script
