@@ -67,28 +67,26 @@ docker run --gpus all --rm -it \
 
 ## Create Vast.ai Template
 
-Create a template with provisioning script. Replace the PROVISIONING_SCRIPT URL with your GitHub raw URL:
+Create a template using an on-start script (recommended). Host the script at a raw URL (e.g., GitHub raw) and run it on boot:
 
 ```bash
+ONSTART_URL="https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/onstart/provision.sh"
+
 vastai create template \
   --name "DeepFaceLab Desktop" \
   --image "mannyj37/dfl-desktop:latest" \
-  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1 -e VNC_PASSWORD=deepfacelab" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab" \
+  --onstart-cmd "bash -lc 'curl -fsSL ${ONSTART_URL} | bash'" \
   --disk_space 200
 ```
 
 **Note:** According to the [Vast.ai Advanced Setup documentation](https://docs.vast.ai/documentation/templates/advanced-setup):
 
 - The `--env` flag accepts Docker options including port mappings with `-p` and environment variables with `-e`
-- `PROVISIONING_SCRIPT` is an environment variable that the Vast.ai base image automatically downloads and executes on first boot
-- The base image handles downloading and running the script from the URL automatically
-- Port mappings must match PORTAL_CONFIG:
-  - `-p 5901:5901`: VNC Desktop (external = internal, uses secure tunnel)
-  - `-p 1111:11111`: Instance Portal (external port 1111 proxies to internal port 11111 via Caddy reverse proxy)
-- PORTAL_CONFIG must be single-quoted to properly handle the pipe character `|` separator
-- OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN configure the Instance Portal open button behavior
-- VNC_PASSWORD sets the VNC password (default: `deepfacelab` if not specified)
-- When external port ≠ internal port (like `1111:11111`), Caddy reverse proxy makes the application available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal).
+- Use `--onstart-cmd` to run your on-start script (it executes inside the container at boot)
+- Port mappings can be assigned automatically; the on-start script reads actual external ports from `VAST_TCP_PORT_5901` and `VAST_TCP_PORT_11111` and sets `PORTAL_CONFIG` accordingly
+- VNC password is set via `VNC_PASSWORD` (default `deepfacelab`)
+- See [Instance Portal docs](https://docs.vast.ai/documentation/instances/connect/instance-portal)
 
 ## List Your Templates
 
@@ -141,9 +139,12 @@ vastai search offers 'geolocation=US gpu_ram>=48' -o dph
 You can also create an instance directly without a template:
 
 ```bash
-vastai create instance 25105510 \
+ONSTART_URL="https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/onstart/provision.sh"
+
+vastai create instance <OFFER_ID> \
   --image "mannyj37/dfl-desktop:latest" \
-  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1 -e VNC_PASSWORD=deepfacelab" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab" \
+  --onstart-cmd "bash -lc 'curl -fsSL ${ONSTART_URL} | bash'" \
   --disk 200 \
   --ssh \
   --direct
@@ -158,7 +159,7 @@ vastai create instance 25105510 \
 - VNC_PASSWORD sets the VNC password (default: `deepfacelab` if not specified)
 - When external ≠ internal (like `1111:11111`), Caddy reverse proxy makes the app available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal)
 
-**Important:** The Vast.ai base image automatically downloads and executes the script from the `PROVISIONING_SCRIPT` environment variable URL on first boot, as documented in the [Advanced Setup guide](https://docs.vast.ai/documentation/templates/advanced-setup).
+**Important:** The on-start script runs inside the container at boot and is idempotent. It configures `PORTAL_CONFIG` using the actual external ports provisioned by Vast so the "Open" button works reliably. See [SSH Connection](https://docs.vast.ai/documentation/instances/connect/ssh) and [Instance Portal](https://docs.vast.ai/documentation/instances/connect/instance-portal).
 
 ## Connect to Instance via SSH
 
