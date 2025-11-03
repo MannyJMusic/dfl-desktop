@@ -44,17 +44,7 @@ apt-get update && \
     libxext6 \
     libxrender-dev \
     libgomp1 \
-    xfce4 \
-    xfce4-goodies \
-    tigervnc-standalone-server \
-    tigervnc-tools \
-    tigervnc-xorg-extension \
-    dbus-x11 \
-    x11-xserver-utils \
-    xfce4-notifyd \
-    network-manager \
     openssh-server \
-    xterm \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -312,74 +302,25 @@ else
     echo "You may need to upload it or configure download URL"
 fi
 
-# Configure VNC server
-echo "Configuring VNC server..."
-VNC_HOME=/root
-mkdir -p ${VNC_HOME}/.vnc
+# VNC setup skipped - not needed for this configuration
 
-# Use VNC_PASSWORD environment variable if set, otherwise default to "deepfacelab"
-VNC_PASSWORD="${VNC_PASSWORD:-deepfacelab}"
-
-# Find vncpasswd command (could be vncpasswd or tigervncpasswd)
-VNCPASSWD_CMD=$(command -v vncpasswd || command -v tigervncpasswd || echo "vncpasswd")
-
-# Create VNC password file using environment variable or default
-echo "${VNC_PASSWORD}" | ${VNCPASSWD_CMD} -f > ${VNC_HOME}/.vnc/passwd
-chmod 600 ${VNC_HOME}/.vnc/passwd
-echo "VNC password configured (from VNC_PASSWORD env var or default)"
-
-# Create xstartup script for XFCE only
-cat > ${VNC_HOME}/.vnc/xstartup << 'EOF'
-#!/bin/bash
-# Redirect output to log file for debugging
-LOG_FILE="$HOME/.vnc/xstartup.log"
-exec > "$LOG_FILE" 2>&1
-
-echo "=== VNC xstartup (XFCE) starting at $(date) ==="
-
-# Load X resources if available
-[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
-
-export XKL_XMODMAP_DISABLE=1
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-
-# Start D-Bus session
-eval $(dbus-launch --sh-syntax)
-export DBUS_SESSION_BUS_ADDRESS
-export DBUS_SESSION_BUS_PID
-
-# Start XFCE session (forever)
-if command -v startxfce4 >/dev/null 2>&1; then
-  exec startxfce4
-elif command -v xfce4-session >/dev/null 2>&1; then
-  exec xfce4-session
-else
-  echo "ERROR: XFCE not installed, starting xterm"
-  xterm -geometry 80x24+0+0 &
-  wait
-fi
-EOF
-
-chmod +x ${VNC_HOME}/.vnc/xstartup
-echo "VNC xstartup script created"
-
-# Note: VNC server can be started manually with: vncserver :1 -geometry 1920x1080 -depth 24
-# Or automatically by supervisor if supervisor scripts are configured
-
-# Set up PORTAL_CONFIG for Vast.ai Instance Portal
-# VNC typically runs on port 5901, mapping to external port
+# Set up PORTAL_CONFIG for Vast.ai Instance Portal (if not already set)
 # Instance Portal runs on port 11111 internally, accessible via port 1111 externally
 echo "Configuring Vast.ai Portal..."
 
 # Determine external ports assigned by Vast.ai (fallbacks to standard)
-EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
 EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
 
 # Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
-DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:5901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
-PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
-export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
+# Only set if PORTAL_CONFIG is not already provided via environment variable
+if [ -z "$PORTAL_CONFIG" ]; then
+    DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
+    PORTAL_CONFIG_VALUE="$DEFAULT_PORTAL_CONFIG"
+    export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
+else
+    PORTAL_CONFIG_VALUE="$PORTAL_CONFIG"
+    echo "Using existing PORTAL_CONFIG: $PORTAL_CONFIG_VALUE"
+fi
 
 # Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
 # 1. /etc/environment (for system-wide environment variables)
@@ -455,7 +396,6 @@ echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
 echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
 echo "Conda environment: ${CONDA_ENV_PATH}"
 echo "To activate: source /opt/setup-dfl-env.sh"
-echo "VNC server can be started manually with: vncserver :1 -geometry 1920x1080 -depth 24"
 
 # Ensure SSH is still running before exit
 if ! pgrep -x sshd > /dev/null 2>&1; then
