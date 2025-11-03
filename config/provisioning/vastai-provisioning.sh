@@ -158,54 +158,8 @@ fi
 
 echo "Cron crash loop fixed"
 
-# Install Miniconda if not present (Vast.ai base image may or may not have it)
-if ! command -v conda &> /dev/null; then
-    echo "Installing Miniconda..."
-    MINICONDA_VERSION="Miniforge3-Linux-x86_64"
-    MINICONDA_INSTALLER="${MINICONDA_VERSION}.sh"
-    wget -q "https://github.com/conda-forge/miniforge/releases/latest/download/${MINICONDA_INSTALLER}" -O /tmp/${MINICONDA_INSTALLER}
-    bash /tmp/${MINICONDA_INSTALLER} -b -p /opt/miniconda3
-    rm /tmp/${MINICONDA_INSTALLER}
-    
-    # Initialize conda
-    /opt/miniconda3/bin/conda init bash
-    source /opt/miniconda3/etc/profile.d/conda.sh
-    
-    # Add conda to PATH
-    export PATH="/opt/miniconda3/bin:${PATH}"
-    conda config --add channels conda-forge
-    conda config --add channels nvidia
-else
-    echo "Conda already installed, using existing installation"
-    # Get conda base path and source it
-    CONDA_BASE=$(conda info --base 2>/dev/null || echo "/opt/miniconda3")
-    if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
-        source "${CONDA_BASE}/etc/profile.d/conda.sh"
-    else
-        # Try common locations
-        if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
-            source /opt/miniconda3/etc/profile.d/conda.sh
-        elif [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
-            source /opt/conda/etc/profile.d/conda.sh
-        else
-            echo "Warning: Could not find conda.sh, conda may not work properly"
-        fi
-    fi
-fi
-
-# Verify conda is working
-if ! command -v conda &> /dev/null; then
-    echo "Error: conda command not found after installation"
-    exit 1
-fi
-
-# Ensure conda is initialized for this script
-if ! conda info --envs &> /dev/null; then
-    echo "Error: conda is not properly initialized"
-    exit 1
-fi
-
-echo "Conda initialized successfully"
+# Skip conda installation - using Vast.ai base image's venv instead
+echo "Using Vast.ai base image's venv (no conda needed)"
 
 # Use Vast.ai base image's venv instead of creating conda environment
 # The base image automatically activates /venv/main/ on SSH, so we'll install there
