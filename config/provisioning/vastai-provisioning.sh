@@ -79,7 +79,7 @@ if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
     ssh-keygen -A
 fi
 
-# Start SSH service
+# Start SSH service (in background so script can continue and exit)
 if command -v service &> /dev/null; then
     service ssh start || service sshd start || true
 elif [ -f /usr/sbin/sshd ]; then
@@ -88,6 +88,7 @@ elif [ -f /usr/bin/sshd ]; then
     /usr/bin/sshd &
 fi
 echo "SSH server configured and started"
+# Ensure SSH continues running in background after script exits
 
 # Fix cron crash loop issue early (Vast.ai base image tries to manage cron but it conflicts with system cron)
 # This must be done early to prevent log spam and potential service conflicts
@@ -443,4 +444,29 @@ echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
 echo "Conda environment: ${CONDA_ENV_PATH}"
 echo "To activate: source /opt/setup-dfl-env.sh"
 echo "VNC server can be started manually with: vncserver :1 -geometry 1920x1080 -depth 24"
+
+# Ensure SSH is still running before exit
+if ! pgrep -x sshd > /dev/null 2>&1; then
+    echo "Ensuring SSH is running before exit..."
+    if command -v service &> /dev/null; then
+        service ssh start || service sshd start || true
+        if ! pgrep -x sshd > /dev/null 2>&1; then
+            if [ -f /usr/sbin/sshd ]; then
+                /usr/sbin/sshd &
+            elif [ -f /usr/bin/sshd ]; then
+                /usr/bin/sshd &
+            fi
+        fi
+    else
+        if [ -f /usr/sbin/sshd ]; then
+            /usr/sbin/sshd &
+        elif [ -f /usr/bin/sshd ]; then
+            /usr/bin/sshd &
+        fi
+    fi
+    sleep 2
+fi
+
+# Exit cleanly - script is done, services run in background
+exit 0
 
