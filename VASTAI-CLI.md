@@ -160,6 +160,73 @@ vastai create instance 25105510 \
 
 **Important:** The Vast.ai base image automatically downloads and executes the script from the `PROVISIONING_SCRIPT` environment variable URL on first boot, as documented in the [Advanced Setup guide](https://docs.vast.ai/documentation/templates/advanced-setup).
 
+## View Container Logs
+
+### View Recent Logs via Vast.ai CLI
+
+To view recent container logs (last 1000 lines by default):
+
+```bash
+vastai logs <INSTANCE_ID>
+```
+
+View last N lines:
+
+```bash
+vastai logs <INSTANCE_ID> --tail <NUMBER>
+```
+
+Example (last 500 lines):
+
+```bash
+vastai logs 12345 --tail 500
+```
+
+### View Real-Time Logs (Streaming)
+
+For real-time streaming logs, you need to SSH into the instance and use Docker logs:
+
+1. **SSH into the instance:**
+
+   ```bash
+   vastai ssh <INSTANCE_ID>
+   ```
+
+2. **Find the container ID:**
+
+   ```bash
+   docker ps
+   ```
+
+3. **Stream logs in real-time:**
+
+   ```bash
+   docker logs -f <CONTAINER_ID>
+   ```
+
+   Or if you know the container name:
+
+   ```bash
+   docker logs -f <container_name>
+   ```
+
+4. **With timestamps:**
+
+   ```bash
+   docker logs -f -t <CONTAINER_ID>
+   ```
+
+### View Provisioning Script Logs
+
+The provisioning script output may also be available in log files. After SSH:
+
+```bash
+# Check for provisioning logs in common locations
+tail -f /tmp/vastai-provisioning.log 2>/dev/null || \
+tail -f /var/log/provisioning.log 2>/dev/null || \
+journalctl -u provisioning -f 2>/dev/null
+```
+
 ## Access VNC Desktop
 
 Once the instance is running and the provisioning script has completed:
