@@ -25,6 +25,14 @@ ENV DFL_MVE_PATH=/opt/DFL-MVE
 ENV DEEPFACELAB_PATH=/opt/DFL-MVE/DeepFaceLab
 ENV MVE_PATH=/opt/MachineVideoEditor
 
+# Install tigervnc-tools at build time so vncpasswd is available immediately
+# This prevents errors when Vast.ai base image tries to start VNC before provisioning script runs
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends tigervnc-tools && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # Vast.ai base image handles the rest via provisioning script
 # The provisioning script (PROVISIONING_SCRIPT env var) will:
 # - Install conda and create deepfacelab environment
