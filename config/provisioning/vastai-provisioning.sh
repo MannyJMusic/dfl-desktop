@@ -48,6 +48,10 @@ apt-get update && \
 echo "Configuring SSH server..."
 mkdir -p /var/run/sshd
 mkdir -p /root/.ssh
+# Ensure /run/sshd exists with correct ownership/permissions (Ubuntu expects this path)
+mkdir -p /run/sshd
+chown root:root /run/sshd
+chmod 755 /run/sshd
 
 # Configure SSH for container use (allow root login, etc.)
 SSH_CONFIG_FILE="/etc/ssh/sshd_config"
@@ -115,6 +119,10 @@ done
 
 # Reload supervisor config after changes
 if command -v supervisorctl &> /dev/null; then
+    # Remove any dedicated cron program file if present to avoid parse errors
+    if [ -f "/etc/supervisor/conf.d/cron.conf" ]; then
+        rm -f /etc/supervisor/conf.d/cron.conf || true
+    fi
     supervisorctl reread 2>/dev/null || true
     supervisorctl update 2>/dev/null || true
     # Make sure cron is still stopped
