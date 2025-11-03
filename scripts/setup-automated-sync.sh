@@ -29,6 +29,93 @@ print_error() {
 
 WORKSPACE_ROOT="/Volumes/MacOSNew/DFL/DeepFaceLab_MacOS"
 
+# Log file destination (macOS vs Linux default)
+if [ "$(uname -s)" = "Darwin" ]; then
+    LOG_FILE="$HOME/Library/Logs/dfl-cron.log"
+else
+    LOG_FILE="$HOME/dfl-cron.log"
+fi
+
+# ===== SSH helpers =====
+get_ssh_hosts() {
+    local ssh_config="$HOME/.ssh/config"
+    [ -f "$ssh_config" ] || return 1
+    # list Host entries (skip wildcard)
+    grep -E "^Host[[:space:]]+" "$ssh_config" | sed 's/^Host[[:space:]]\+//' | grep -v '^\*$' | tr '\n' ' '
+}
+
+get_host_details() {
+    local host="$1"; local ssh_config="$HOME/.ssh/config"
+    local temp=$(mktemp)
+    # extract block
+    sed -n "/^Host[[:space:]]\+${host}[[:space:]]*$/,/^Host[[:space:]]/p" "$ssh_config" | sed '$d' > "$temp"
+    SSH_HOSTNAME=$(grep -m1 "^[[:space:]]*HostName" "$temp" | sed 's/^[[:space:]]*HostName[[:space:]]*//')
+    SSH_USER=$(grep -m1 "^[[:space:]]*User" "$temp" | sed 's/^[[:space:]]*User[[:space:]]*//')
+    SSH_PORT=$(grep -m1 "^[[:space:]]*Port" "$temp" | sed 's/^[[:space:]]*Port[[:space:]]*//')
+    rm -f "$temp"
+    [ -n "$SSH_USER" ] || SSH_USER="$USER"
+    [ -n "$SSH_PORT" ] || SSH_PORT="22"
+}
+
+resolve_ssh_port() {
+    # Prefer ssh -G (resolves full config). Args: host_token
+    local token="$1"
+    local p
+    p=$(ssh -G "$token" 2>/dev/null | awk '/^port /{print $2}' | tail -n1)
+    if [ -n "$p" ]; then
+        echo "$p"
+    else
+        echo "22"
+    fi
+}
+
+resolve_ssh_user() {
+    local token="$1"
+    local u
+    u=$(ssh -G "$token" 2>/dev/null | awk '/^user /{print $2}' | tail -n1)
+    if [ -n "$u" ]; then
+        echo "$u"
+    else
+        echo "$USER"
+    fi
+}
+
+select_ssh_host_prompt() {
+    local hosts_list; hosts_list=$(get_ssh_hosts || true)
+    if [ -z "$hosts_list" ]; then
+        print_warning "No SSH hosts found in ~/.ssh/config; falling back to manual entry."
+        return 1
+    fi
+    local tmp_hosts; tmp_hosts=$(mktemp)
+    # One host per line
+    echo "$hosts_list" | tr ' ' '\n' | sed '/^$/d' > "$tmp_hosts"
+    echo ""
+    echo "Configured SSH hosts:"
+    nl -ba "$tmp_hosts" | while read -r n h; do
+        ru=$(resolve_ssh_user "$h"); rp=$(resolve_ssh_port "$h")
+        printf "  %d) %s  -> %s@%s:%s\n" "$n" "$h" "$ru" "$h" "$rp"
+    done
+    local count; count=$(wc -l < "$tmp_hosts")
+    local next=$((count+1))
+    echo "  $next) Manual entry"
+    echo ""
+    read -p "Select host (1-$next): " sel
+    if [ "$sel" = "$next" ]; then
+        rm -f "$tmp_hosts"
+        return 1
+    fi
+    if [ "$sel" -ge 1 ] 2>/dev/null && [ "$sel" -le "$count" ] 2>/dev/null; then
+        local chosen; chosen=$(sed -n "${sel}p" "$tmp_hosts")
+        rm -f "$tmp_hosts"
+        get_host_details "$chosen"
+        SELECTED_HOST_ALIAS="$chosen"
+        return 0
+    fi
+    rm -f "$tmp_hosts"
+    print_error "Invalid selection"
+    return 2
+}
+
 echo "=================================================="
 echo "  Automated Rsync Sync Setup"
 echo "=================================================="
@@ -45,6 +132,7 @@ add_cron_job() {
     print_info "Adding: $description"
     print_info "Schedule: $schedule"
     print_info "Command: $command"
+    print_info "Log file: $LOG_FILE"
     echo ""
     
     # Check if job already exists
@@ -54,8 +142,13 @@ add_cron_job() {
     fi
     
     # Add to crontab
-    (crontab -l 2>/dev/null; echo "$schedule # DFL: $description") | crontab -
+    # Append logging redirection
+    local job_cmd
+    job_cmd="$command >> \"$LOG_FILE\" 2>&1"
+    (crontab -l 2>/dev/null; echo "$schedule $job_cmd # DFL: $description") | crontab -
     print_success "Added: $description"
+    echo ""
+    print_info "Tip: tail -f \"$LOG_FILE\" to watch output"
 }
 
 # Main menu
@@ -111,7 +204,8 @@ case $choice in
         echo "1. Workspace only"
         echo "2. Full backup"
         echo "3. Custom command"
-        read -p "Choice (1-3): " sync_type
+        echo "4. Model fetch (rsync over SSH)"
+        read -p "Choice (1-4): " sync_type
         
         case $sync_type in
             1)
@@ -122,6 +216,35 @@ case $choice in
                 ;;
             3)
                 read -p "Enter custom command: " CMD
+                ;;
+            4)
+                echo ""
+                echo "Model fetch (rsync over SSH)"
+                echo "Select SSH host from ~/.ssh/config or enter manually:"
+                if select_ssh_host_prompt; then
+                    # Force root user while honoring ~/.ssh/config (Port, IdentityFile, Proxy, etc.)
+                    RSYNC_HOST_TOKEN="root@${SELECTED_HOST_ALIAS}"
+                    RSYNC_SSH_CMD="ssh -F $HOME/.ssh/config"
+                else
+                    read -p "Remote host (user@hostname or host alias): " REMOTE_HOST
+                    # Try to resolve via ssh -G; fall back to prompt if unknown
+                    RESOLVED_PORT=$(resolve_ssh_port "$REMOTE_HOST")
+                    read -p "Remote port [${RESOLVED_PORT}]: " REMOTE_PORT
+                    RESOLVED_PORT=${REMOTE_PORT:-$RESOLVED_PORT}
+                    RSYNC_HOST_TOKEN="$REMOTE_HOST"
+                    # Optional key prompt for non-alias hosts
+                    read -p "Path to private key (ENTER to skip): " REMOTE_KEY
+                    if [ -n "$REMOTE_KEY" ]; then
+                        RSYNC_SSH_CMD="ssh -p ${RESOLVED_PORT} -i ${REMOTE_KEY} -o IdentitiesOnly=yes"
+                    else
+                        RSYNC_SSH_CMD="ssh -p ${RESOLVED_PORT}"
+                    fi
+                fi
+                read -p "Remote source directory (e.g., /remote/models/): " REMOTE_DIR
+                read -p "Local target directory (e.g., /local/path/to/models/): " LOCAL_DIR
+                echo ""
+                print_info "Will sync from ${RSYNC_HOST_TOKEN}:${REMOTE_DIR} to ${LOCAL_DIR} using ~/.ssh/config"
+                CMD="rsync -avz --delete -e \"${RSYNC_SSH_CMD}\" ${RSYNC_HOST_TOKEN}:${REMOTE_DIR} ${LOCAL_DIR}"
                 ;;
         esac
         
