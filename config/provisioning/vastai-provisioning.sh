@@ -342,8 +342,13 @@ vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
 # Instance Portal runs on port 11111 internally, accessible via port 1111 externally
 echo "Configuring Vast.ai Portal..."
 
-# Use PORTAL_CONFIG from environment if set, otherwise use default
-PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal}"
+# Determine external ports assigned by Vast.ai (fallbacks to standard)
+EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
+EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
+
+# Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
+DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:5901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
+PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
 export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
 
 # Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
@@ -359,7 +364,7 @@ printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
 mv "$TMP_ENV_FILE" /etc/environment
 
 # 2. Ensure OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN are set
-OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-1111}"
+OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-$EXTERNAL_PORTAL_PORT}"
 OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
 
 TMP_ENV_FILE=$(mktemp)
