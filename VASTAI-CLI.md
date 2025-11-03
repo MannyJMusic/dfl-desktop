@@ -73,7 +73,7 @@ Create a template with provisioning script. Replace the PROVISIONING_SCRIPT URL 
 vastai create template \
   --name "DeepFaceLab Desktop" \
   --image "mannyj37/dfl-desktop:latest" \
-  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1" \
+  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1 -e VNC_PASSWORD=deepfacelab" \
   --disk_space 200
 ```
 
@@ -87,6 +87,7 @@ vastai create template \
   - `-p 1111:11111`: Instance Portal (external port 1111 proxies to internal port 11111 via Caddy reverse proxy)
 - PORTAL_CONFIG must be single-quoted to properly handle the pipe character `|` separator
 - OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN configure the Instance Portal open button behavior
+- VNC_PASSWORD sets the VNC password (default: `deepfacelab` if not specified)
 - When external port ≠ internal port (like `1111:11111`), Caddy reverse proxy makes the application available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal).
 
 ## List Your Templates
@@ -142,7 +143,7 @@ You can also create an instance directly without a template:
 ```bash
 vastai create instance 25105510 \
   --image "mannyj37/dfl-desktop:latest" \
-  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1" \
+  --env "-p 5901:5901 -p 1111:11111 -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh -e PORTAL_CONFIG='localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal' -e OPEN_BUTTON_PORT=1111 -e OPEN_BUTTON_TOKEN=1 -e VNC_PASSWORD=deepfacelab" \
   --disk 200 \
   --ssh \
   --direct
@@ -154,6 +155,7 @@ vastai create instance 25105510 \
 - `PROVISIONING_SCRIPT` environment variable is automatically downloaded and executed by the Vast.ai base image on first boot - no `--onstart-cmd` needed
 - PORTAL_CONFIG format is `Interface:ExternalPort:InternalPort:Path:Name` - must be single-quoted to handle the pipe character
 - OPEN_BUTTON_PORT=1111 and OPEN_BUTTON_TOKEN=1 configure the Instance Portal open button
+- VNC_PASSWORD sets the VNC password (default: `deepfacelab` if not specified)
 - When external ≠ internal (like `1111:11111`), Caddy reverse proxy makes the app available on the external port, as per the [Instance Portal documentation](https://docs.vast.ai/documentation/instances/connect/instance-portal)
 
 **Important:** The Vast.ai base image automatically downloads and executes the script from the `PROVISIONING_SCRIPT` environment variable URL on first boot, as documented in the [Advanced Setup guide](https://docs.vast.ai/documentation/templates/advanced-setup).
@@ -165,7 +167,7 @@ Once the instance is running and the provisioning script has completed:
 1. Access the instance via SSH
 2. The VNC server runs on display :1 (port 5901)
 3. Use the Instance Portal link provided by Vast.ai to access VNC through your browser
-4. Default VNC password: `deepfacelab`
+4. Default VNC password: `deepfacelab` (can be changed via `VNC_PASSWORD` environment variable)
 
 ## Activate DeepFaceLab Environment
 

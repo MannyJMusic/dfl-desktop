@@ -25,6 +25,9 @@ ENV DFL_MVE_PATH=/opt/DFL-MVE
 ENV DEEPFACELAB_PATH=/opt/DFL-MVE/DeepFaceLab
 ENV MVE_PATH=/opt/MachineVideoEditor
 
+# VNC password - can be overridden at runtime via -e VNC_PASSWORD=yourpassword
+ENV VNC_PASSWORD=deepfacelab
+
 # Install tigervnc-tools at build time so vncpasswd is available immediately
 # This prevents errors when Vast.ai base image tries to start VNC before provisioning script runs
 RUN export DEBIAN_FRONTEND=noninteractive && \

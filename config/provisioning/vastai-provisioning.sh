@@ -152,6 +152,9 @@ echo "Configuring VNC server..."
 VNC_HOME=/root
 mkdir -p ${VNC_HOME}/.vnc
 
+# Use VNC_PASSWORD environment variable if set, otherwise default to "deepfacelab"
+VNC_PASSWORD="${VNC_PASSWORD:-deepfacelab}"
+
 # Ensure tigervnc-tools is installed (should already be in Dockerfile, but verify)
 if ! command -v vncpasswd &> /dev/null && ! command -v tigervncpasswd &> /dev/null; then
     echo "Installing tigervnc-tools..."
@@ -161,9 +164,10 @@ fi
 # Find vncpasswd command (could be vncpasswd or tigervncpasswd)
 VNCPASSWD_CMD=$(command -v vncpasswd || command -v tigervncpasswd || echo "vncpasswd")
 
-# Create VNC password (default: deepfacelab)
-echo "deepfacelab" | ${VNCPASSWD_CMD} -f > ${VNC_HOME}/.vnc/passwd
+# Create VNC password file using environment variable or default
+echo "${VNC_PASSWORD}" | ${VNCPASSWD_CMD} -f > ${VNC_HOME}/.vnc/passwd
 chmod 600 ${VNC_HOME}/.vnc/passwd
+echo "VNC password configured (from VNC_PASSWORD env var or default)"
 
 # Create xstartup script for KDE Plasma
 cat > ${VNC_HOME}/.vnc/xstartup << 'EOF'
