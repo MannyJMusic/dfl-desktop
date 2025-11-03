@@ -1,0 +1,77 @@
+# Standalone DeepFaceLab desktop image (no Vast base image)
+# - Ubuntu 22.04 + CUDA 12.1.1 + cuDNN8
+# - SSH server
+# - TigerVNC + XFCE desktop on :1 (port 5901)
+# - Miniforge (conda) + Python 3.10 environment (deepfacelab)
+
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    VNC_PASSWORD=deepfacelab \
+    CONDA_PREFIX=/opt/miniconda3 \
+    CONDA_ENV=/opt/conda-envs/deepfacelab
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Base packages, SSH, VNC, desktop, tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      openssh-server sudo git curl wget ca-certificates \
+      locales tzdata \
+      xfce4 xfce4-goodies x11-xserver-utils dbus-x11 \
+      tigervnc-standalone-server tigervnc-tools \
+      ffmpeg \
+      less rsync nano && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Locale
+RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+# SSH setup
+RUN mkdir -p /run/sshd && \
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+    echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "root:deepfacelab" | chpasswd
+EXPOSE 22 5901
+
+# Install Miniforge (conda) and create environment
+RUN curl -fsSL -o /tmp/mf.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh && \
+    bash /tmp/mf.sh -b -p ${CONDA_PREFIX} && rm -f /tmp/mf.sh && \
+    . ${CONDA_PREFIX}/etc/profile.d/conda.sh && \
+    conda config --add channels conda-forge && \
+    mkdir -p /opt/conda-envs && \
+    conda create -y -p ${CONDA_ENV} python=3.10 cudatoolkit=11.8 && \
+    conda clean -afy
+
+# Install minimal Python deps for DFL workflow (adjust as needed)
+RUN . ${CONDA_PREFIX}/etc/profile.d/conda.sh && \
+    conda activate ${CONDA_ENV} && \
+    python -m pip install --no-cache-dir \
+      tqdm numpy==1.23.5 numexpr \
+      h5py==3.8.0 opencv-python==4.8.1.78 ffmpeg-python==0.1.17 \
+      scikit-image==0.21.0 scipy==1.11.3 colorama pyqt5 tf2onnx==1.15.0 && \
+    conda deactivate
+
+# VNC setup
+RUN mkdir -p /root/.vnc && \
+    bash -lc 'echo "${VNC_PASSWORD}" | (vncpasswd -f || tigervncpasswd -f) > /root/.vnc/passwd' || true && \
+    chmod 600 /root/.vnc/passwd && \
+    printf "#!/bin/bash\n" > /root/.vnc/xstartup && \
+    printf "[ -r \"$HOME/.Xresources\" ] && xrdb \"$HOME/.Xresources\"\n" >> /root/.vnc/xstartup && \
+    printf "export XKL_XMODMAP_DISABLE=1\n" >> /root/.vnc/xstartup && \
+    printf "startxfce4 &\n" >> /root/.vnc/xstartup && \
+    chmod +x /root/.vnc/xstartup
+
+# Startup script: start SSH and VNC
+RUN printf "#!/usr/bin/env bash\nset -e\n\nmkdir -p /run/sshd /root/.vnc /workspace\n\n# Idempotent fetch of DFL Desktop sources into persistent workspace\nif ! [ -d /workspace/DFL-Desktop ]; then\n  echo '[startup] fetching DFL Desktop sources...'\n  git clone --depth 1 https://github.com/MannyJMusic/DFL-MVE.git /workspace/DFL-Desktop || true\n  ln -sf /workspace/DFL-Desktop /opt/DFL-Desktop 2>/dev/null || true\nfi\n\n# Ensure VNC password exists\nif ! [ -f /root/.vnc/passwd ]; then\n  echo \"${VNC_PASSWORD}\" | (vncpasswd -f || tigervncpasswd -f) > /root/.vnc/passwd\n  chmod 600 /root/.vnc/passwd\nfi\n\n# Start SSH and VNC\nservice ssh start\n# Start VNC on :1\nvncserver :1 -geometry 1920x1080 -depth 24 || true\n\n# Keep running\ntail -f /var/log/auth.log /tmp/vnc* 2>/dev/null || tail -f /dev/null\n" > /usr/local/bin/startup.sh && \
+    chmod +x /usr/local/bin/startup.sh
+
+# Activate environment on login
+RUN echo ". ${CONDA_PREFIX}/etc/profile.d/conda.sh" >> /root/.bashrc && \
+    echo "conda activate ${CONDA_ENV}" >> /root/.bashrc
+
+CMD ["/usr/local/bin/startup.sh"]
+
+
