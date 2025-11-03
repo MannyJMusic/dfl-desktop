@@ -296,26 +296,72 @@ fi
 
 # Install DeepFaceLab Python dependencies
 echo "Installing DeepFaceLab dependencies..."
-python -m pip install --no-cache-dir \
-    tqdm \
-    numpy==1.23.5 \
-    numexpr \
-    h5py==3.8.0 \
-    opencv-python==4.8.1.78 \
-    ffmpeg-python==0.1.17 \
-    scikit-image==0.21.0 \
-    scipy==1.11.3 \
-    colorama \
-    pyqt5 \
-    tf2onnx==1.15.0 \
-    Flask==2.3.3 \
-    flask-socketio==5.3.5 \
-    tensorboardX \
-    crc32c \
-    jsonschema \
-    Jinja2==3.1.2 \
-    werkzeug==2.3.7 \
-    itsdangerous==2.1.2
+# Check Python version for compatibility
+PYTHON_MAJOR_MINOR=$(python --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+PYTHON_MINOR=$(python --version 2>&1 | awk '{print $2}' | cut -d. -f2)
+
+# For Python 3.12+, use compatible versions
+if [ "$PYTHON_MINOR" -ge 12 ]; then
+    echo "Python 3.12+ detected, using compatible package versions..."
+    # Don't downgrade numpy if TensorFlow already installed a newer version
+    python -m pip install --no-cache-dir \
+        tqdm \
+        numexpr \
+        'opencv-python>=4.8.1' \
+        ffmpeg-python==0.1.17 \
+        scikit-image==0.21.0 \
+        'scipy>=1.11.0' \
+        colorama \
+        pyqt5 \
+        'tf2onnx>=1.15.0' \
+        'Flask>=2.3.0' \
+        flask-socketio==5.3.5 \
+        tensorboardX \
+        crc32c \
+        jsonschema \
+        'Jinja2>=3.1.0' \
+        'werkzeug>=2.3.0' \
+        'itsdangerous>=2.1.0'
+    # Check if numpy is already installed (from TensorFlow)
+    if python -c "import numpy" 2>/dev/null; then
+        NUMPY_VERSION=$(python -c "import numpy; print(numpy.__version__)" 2>/dev/null)
+        echo "NumPy already installed: ${NUMPY_VERSION} (from TensorFlow), skipping..."
+    else
+        echo "Installing compatible NumPy version..."
+        python -m pip install --no-cache-dir 'numpy>=1.26.0'
+    fi
+    # Check if h5py is already installed (from TensorFlow)
+    if python -c "import h5py" 2>/dev/null; then
+        H5PY_VERSION=$(python -c "import h5py; print(h5py.__version__)" 2>/dev/null)
+        echo "h5py already installed: ${H5PY_VERSION} (from TensorFlow), skipping..."
+    else
+        echo "Installing compatible h5py version..."
+        python -m pip install --no-cache-dir 'h5py>=3.10.0'
+    fi
+else
+    # For Python 3.10/3.11, use original versions
+    echo "Python 3.10/3.11 detected, using original package versions..."
+    python -m pip install --no-cache-dir \
+        tqdm \
+        numpy==1.23.5 \
+        numexpr \
+        h5py==3.8.0 \
+        opencv-python==4.8.1.78 \
+        ffmpeg-python==0.1.17 \
+        scikit-image==0.21.0 \
+        scipy==1.11.3 \
+        colorama \
+        pyqt5 \
+        tf2onnx==1.15.0 \
+        Flask==2.3.3 \
+        flask-socketio==5.3.5 \
+        tensorboardX \
+        crc32c \
+        jsonschema \
+        Jinja2==3.1.2 \
+        werkzeug==2.3.7 \
+        itsdangerous==2.1.2
+fi
 
 # Clone DFL-MVE repository (temporary location)
 echo "Cloning DFL-MVE repository..."
