@@ -3,10 +3,12 @@
 # This script runs on first boot to set up the environment
 set -eo pipefail
 
-# Define paths (everything goes to /opt/)
+# Define paths (everything goes to /opt/ at same level)
 export DFL_MVE_PATH=/opt/DFL-MVE
-export DEEPFACELAB_PATH=/opt/DFL-MVE/DeepFaceLab
+export DEEPFACELAB_PATH=/opt/DeepFaceLab
 export MVE_PATH=/opt/MachineVideoEditor
+export SCRIPTS_PATH=/opt/scripts
+export WORKSPACE_PATH=/opt/workspace
 export CONDA_ENV_NAME=deepfacelab
 export CONDA_ENV_PATH=/opt/conda-envs/${CONDA_ENV_NAME}
 
@@ -239,7 +241,7 @@ python -m pip install --no-cache-dir \
     werkzeug==2.3.7 \
     itsdangerous==2.1.2
 
-# Clone DFL-MVE repository
+# Clone DFL-MVE repository (temporary location)
 echo "Cloning DFL-MVE repository..."
 if [ ! -d "${DFL_MVE_PATH}" ]; then
     git clone https://github.com/MannyJMusic/DFL-MVE.git ${DFL_MVE_PATH}
@@ -247,46 +249,65 @@ else
     echo "DFL-MVE already exists, skipping clone"
 fi
 
-# Create workspace directories
-echo "Creating workspace directories..."
-# Check if workspace root is a mount point (from Vast.ai volume)
-if mountpoint -q ${WORKSPACE_ROOT} 2>/dev/null || (df ${WORKSPACE_ROOT} 2>/dev/null | grep -q "^/dev" 2>/dev/null); then
-    echo "Detected ${WORKSPACE_ROOT} as volume mount point, using it for DeepFaceLab workspace"
-    # Ensure workspace root exists
-    mkdir -p ${WORKSPACE_ROOT}
-    # Create symlink from /opt/DFL-MVE/DeepFaceLab/workspace to workspace root
-    rm -rf ${DEEPFACELAB_PATH}/workspace 2>/dev/null || true
-    mkdir -p ${DEEPFACELAB_PATH}
-    ln -sf ${WORKSPACE_ROOT} ${DEEPFACELAB_PATH}/workspace
-    # Create workspace subdirectories in workspace root
-    mkdir -p ${WORKSPACE_ROOT}/data_src
-    mkdir -p ${WORKSPACE_ROOT}/data_src/aligned
-    mkdir -p ${WORKSPACE_ROOT}/data_src/aligned_debug
-    mkdir -p ${WORKSPACE_ROOT}/data_dst
-    mkdir -p ${WORKSPACE_ROOT}/data_dst/aligned
-    mkdir -p ${WORKSPACE_ROOT}/data_dst/aligned_debug
-    mkdir -p ${WORKSPACE_ROOT}/model
+# Copy DeepFaceLab to /opt/DeepFaceLab (same level, not nested)
+echo "Setting up DeepFaceLab at /opt/DeepFaceLab..."
+if [ -d "${DFL_MVE_PATH}/DeepFaceLab" ]; then
+    if [ -d "${DEEPFACELAB_PATH}" ]; then
+        echo "DeepFaceLab already exists at ${DEEPFACELAB_PATH}, skipping copy"
+    else
+        cp -r ${DFL_MVE_PATH}/DeepFaceLab ${DEEPFACELAB_PATH}
+        echo "DeepFaceLab copied to ${DEEPFACELAB_PATH}"
+    fi
 else
-    echo "Creating workspace in /opt/DFL-MVE/DeepFaceLab/workspace"
-    mkdir -p ${DEEPFACELAB_PATH}/workspace
-    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src
-    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned
-    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned_debug
-    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst
-    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned
-    mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned_debug
-    mkdir -p ${DEEPFACELAB_PATH}/workspace/model
+    echo "Error: DeepFaceLab not found in ${DFL_MVE_PATH}/DeepFaceLab"
+    exit 1
 fi
 
-# Copy runtime scripts if they exist in workspace, otherwise create placeholder
-echo "Setting up runtime scripts..."
-if [ -d "${WORKSPACE_ROOT}/scripts" ]; then
-    cp -r ${WORKSPACE_ROOT}/scripts ${DEEPFACELAB_PATH}/scripts
-    chmod +x ${DEEPFACELAB_PATH}/scripts/*.sh
-    echo "Runtime scripts copied from ${WORKSPACE_ROOT}/scripts"
+# Set up workspace - symlink to mounted volume
+echo "Setting up workspace at /opt/workspace..."
+# Check if workspace root is a mount point (from Vast.ai volume)
+if mountpoint -q ${WORKSPACE_ROOT} 2>/dev/null || (df ${WORKSPACE_ROOT} 2>/dev/null | grep -q "^/dev" 2>/dev/null); then
+    echo "Detected ${WORKSPACE_ROOT} as volume mount point, symlinking /opt/workspace to it"
+    # Remove existing workspace if it exists
+    rm -rf ${WORKSPACE_PATH} 2>/dev/null || true
+    # Create symlink from /opt/workspace to workspace root (mounted volume)
+    ln -sf ${WORKSPACE_ROOT} ${WORKSPACE_PATH}
+    echo "Workspace symlinked: ${WORKSPACE_PATH} -> ${WORKSPACE_ROOT}"
 else
-    echo "Warning: Runtime scripts not found in ${WORKSPACE_ROOT}/scripts"
-    mkdir -p ${DEEPFACELAB_PATH}/scripts
+    echo "No volume mount detected, creating workspace at ${WORKSPACE_PATH}"
+    mkdir -p ${WORKSPACE_PATH}
+fi
+
+# Create workspace subdirectories
+mkdir -p ${WORKSPACE_PATH}/data_src
+mkdir -p ${WORKSPACE_PATH}/data_src/aligned
+mkdir -p ${WORKSPACE_PATH}/data_src/aligned_debug
+mkdir -p ${WORKSPACE_PATH}/data_dst
+mkdir -p ${WORKSPACE_PATH}/data_dst/aligned
+mkdir -p ${WORKSPACE_PATH}/data_dst/aligned_debug
+mkdir -p ${WORKSPACE_PATH}/model
+
+# Set up scripts - copy to /opt/scripts (same level, not nested in DeepFaceLab)
+echo "Setting up scripts at /opt/scripts..."
+if [ -d "${WORKSPACE_ROOT}/scripts" ]; then
+    if [ -d "${SCRIPTS_PATH}" ]; then
+        echo "Scripts already exist at ${SCRIPTS_PATH}, skipping copy"
+    else
+        cp -r ${WORKSPACE_ROOT}/scripts ${SCRIPTS_PATH}
+        chmod +x ${SCRIPTS_PATH}/*.sh 2>/dev/null || true
+        echo "Scripts copied from ${WORKSPACE_ROOT}/scripts to ${SCRIPTS_PATH}"
+    fi
+elif [ -d "${DFL_MVE_PATH}/scripts" ]; then
+    if [ -d "${SCRIPTS_PATH}" ]; then
+        echo "Scripts already exist at ${SCRIPTS_PATH}, skipping copy"
+    else
+        cp -r ${DFL_MVE_PATH}/scripts ${SCRIPTS_PATH}
+        chmod +x ${SCRIPTS_PATH}/*.sh 2>/dev/null || true
+        echo "Scripts copied from ${DFL_MVE_PATH}/scripts to ${SCRIPTS_PATH}"
+    fi
+else
+    echo "Warning: No scripts found, creating empty directory at ${SCRIPTS_PATH}"
+    mkdir -p ${SCRIPTS_PATH}
 fi
 
 # Set up Machine Video Editor
@@ -382,22 +403,29 @@ cat > /opt/setup-dfl-env.sh << EOF
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate ${CONDA_ENV_PATH}
 export DFL_PYTHON="python"
-export DFL_WORKSPACE="${DEEPFACELAB_PATH}/workspace/"
+export DFL_WORKSPACE="${WORKSPACE_PATH}/"
 export DFL_ROOT="${DEEPFACELAB_PATH}/"
-export DFL_SRC="${DEEPFACELAB_PATH}/DeepFaceLab"
+export DFL_SRC="${DEEPFACELAB_PATH}"
 cd ${DEEPFACELAB_PATH}
 EOF
 chmod +x /opt/setup-dfl-env.sh
 
-# Create symlink for convenience (in /opt, not /root)
-ln -sf ${DEEPFACELAB_PATH}/workspace /opt/workspace 2>/dev/null || true
-ln -sf ${DEEPFACELAB_PATH} /opt/DeepFaceLab 2>/dev/null || true
+# Note: DeepFaceLab, scripts, and workspace are now all at /opt/ level
+# - /opt/DeepFaceLab (actual copy)
+# - /opt/scripts (copy from workspace or repo)
+# - /opt/workspace (symlink to mounted volume at ${WORKSPACE_ROOT})
 
 echo "=== Provisioning Complete ==="
 echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
-echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
+echo "Scripts available at: ${SCRIPTS_PATH}"
+echo "Workspace available at: ${WORKSPACE_PATH} (symlinked to ${WORKSPACE_ROOT})"
 echo "Conda environment: ${CONDA_ENV_PATH}"
 echo "To activate: source /opt/setup-dfl-env.sh"
+echo ""
+echo "Structure:"
+echo "  /opt/DeepFaceLab/ - DeepFaceLab installation"
+echo "  /opt/scripts/ - Runtime scripts"
+echo "  /opt/workspace/ - Workspace (symlinked to mounted volume)"
 
 # Ensure SSH is still running before exit
 if ! pgrep -x sshd > /dev/null 2>&1; then
