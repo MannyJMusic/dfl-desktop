@@ -93,6 +93,7 @@ if [ ! -f "$MARKER" ]; then
 fi
 
 # 7) VNC setup (idempotent)
+mkdir -p /root/.vnc
 if [ ! -f /root/.vnc/passwd ]; then
   VNCPASSWD_CMD="$(command -v vncpasswd || command -v tigervncpasswd || echo vncpasswd)"
   echo "${VNC_PASSWORD:-deepfacelab}" | $VNCPASSWD_CMD -f > /root/.vnc/passwd
