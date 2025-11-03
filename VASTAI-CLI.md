@@ -160,6 +160,45 @@ vastai create instance 25105510 \
 
 **Important:** The Vast.ai base image automatically downloads and executes the script from the `PROVISIONING_SCRIPT` environment variable URL on first boot, as documented in the [Advanced Setup guide](https://docs.vast.ai/documentation/templates/advanced-setup).
 
+## Connect to Instance via SSH
+
+To SSH into your Vast.ai instance:
+
+1. **Get the SSH connection command:**
+
+   ```bash
+   vastai ssh-url <INSTANCE_ID>
+   ```
+
+   Example output:
+
+   ```bash
+   ssh -p 12345 root@123.456.789.012
+   ```
+
+2. **Connect to the instance:**
+
+   **Option A:** Copy and paste the command from step 1
+
+   **Option B:** Run it directly in one command:
+
+   ```bash
+   $(vastai ssh-url <INSTANCE_ID>)
+   ```
+
+   **Option C:** Use the web console's "Connect" button which provides the same SSH command
+
+### Alternative: Using SSH Key
+
+If you need to attach your SSH key to the instance first:
+
+```bash
+# Attach your SSH key to the instance
+vastai attach ssh <INSTANCE_ID> "$(cat ~/.ssh/id_rsa.pub)"
+```
+
+Then use `vastai ssh-url <INSTANCE_ID>` to get the connection command.
+
 ## View Container Logs
 
 ### View Recent Logs via Vast.ai CLI
@@ -186,19 +225,33 @@ vastai logs 12345 --tail 500
 
 For real-time streaming logs, you need to SSH into the instance and use Docker logs:
 
-1. **SSH into the instance:**
+1. **Get SSH connection command:**
 
    ```bash
-   vastai ssh <INSTANCE_ID>
+   vastai ssh-url <INSTANCE_ID>
    ```
 
-2. **Find the container ID:**
+   This will output an SSH command like:
+
+   ```bash
+   ssh -p <port> root@<instance_ip>
+   ```
+
+2. **SSH into the instance:**
+
+   Copy and run the command from step 1, or use it directly:
+
+   ```bash
+   $(vastai ssh-url <INSTANCE_ID>)
+   ```
+
+3. **Find the container ID:**
 
    ```bash
    docker ps
    ```
 
-3. **Stream logs in real-time:**
+4. **Stream logs in real-time:**
 
    ```bash
    docker logs -f <CONTAINER_ID>
@@ -210,7 +263,7 @@ For real-time streaming logs, you need to SSH into the instance and use Docker l
    docker logs -f <container_name>
    ```
 
-4. **With timestamps:**
+5. **With timestamps:**
 
    ```bash
    docker logs -f -t <CONTAINER_ID>
@@ -226,6 +279,48 @@ tail -f /tmp/vastai-provisioning.log 2>/dev/null || \
 tail -f /var/log/provisioning.log 2>/dev/null || \
 journalctl -u provisioning -f 2>/dev/null
 ```
+
+## Troubleshooting Connect Button Issues
+
+If the "Connect" or "Open" button in the Vast.ai console isn't working:
+
+1. **Check Instance Portal Service:**
+
+   ```bash
+   # Get SSH command
+   vastai ssh-url <INSTANCE_ID>
+   # SSH into the instance (use the command from above)
+   ssh -p <port> root@<instance_ip>
+   # Check if Instance Portal is running
+   ps aux | grep -i portal
+   netstat -tlnp | grep 11111
+   ```
+
+2. **Verify PORTAL_CONFIG:**
+
+   ```bash
+   # Inside the container
+   cat /etc/environment | grep PORTAL_CONFIG
+   echo $PORTAL_CONFIG
+   ```
+
+3. **Check OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN:**
+
+   ```bash
+   cat /etc/environment | grep OPEN_BUTTON
+   ```
+
+4. **Restart Instance Portal (if needed):**
+
+   ```bash
+   # Inside the container
+   supervisorctl restart instance_portal
+   # Or restart the entire container
+   ```
+
+5. **Verify Port Mapping:**
+   - External port 1111 should map to internal port 11111
+   - Check with: `docker ps` to see port mappings
 
 ## Access VNC Desktop
 

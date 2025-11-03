@@ -271,21 +271,50 @@ vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
 # VNC typically runs on port 5901, mapping to external port
 # Instance Portal runs on port 11111 internally, accessible via port 1111 externally
 echo "Configuring Vast.ai Portal..."
-rm -f /etc/portal.yaml
 
-# Write PORTAL_CONFIG to /etc/portal.yaml (Vast.ai reads this on startup)
-# Format: Interface:ExternalPort:InternalPort:Path:Name
-PORTAL_CONFIG_VALUE="localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal"
+# Use PORTAL_CONFIG from environment if set, otherwise use default
+PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal}"
 export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
 
-# Also write to /etc/environment so it persists and is available to all processes
-echo "PORTAL_CONFIG=\"$PORTAL_CONFIG_VALUE\"" >> /etc/environment
-echo "OPEN_BUTTON_PORT=1111" >> /etc/environment
-echo "OPEN_BUTTON_TOKEN=1" >> /etc/environment
+# Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
+# 1. /etc/environment (for system-wide environment variables)
+if ! grep -q "^PORTAL_CONFIG=" /etc/environment 2>/dev/null; then
+    echo "PORTAL_CONFIG=\"$PORTAL_CONFIG_VALUE\"" >> /etc/environment
+else
+    # Update existing entry
+    sed -i "s|^PORTAL_CONFIG=.*|PORTAL_CONFIG=\"$PORTAL_CONFIG_VALUE\"|" /etc/environment
+fi
+
+# 2. Ensure OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN are set
+OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-1111}"
+OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
+
+if ! grep -q "^OPEN_BUTTON_PORT=" /etc/environment 2>/dev/null; then
+    echo "OPEN_BUTTON_PORT=$OPEN_BUTTON_PORT" >> /etc/environment
+else
+    sed -i "s|^OPEN_BUTTON_PORT=.*|OPEN_BUTTON_PORT=$OPEN_BUTTON_PORT|" /etc/environment
+fi
+
+if ! grep -q "^OPEN_BUTTON_TOKEN=" /etc/environment 2>/dev/null; then
+    echo "OPEN_BUTTON_TOKEN=$OPEN_BUTTON_TOKEN" >> /etc/environment
+else
+    sed -i "s|^OPEN_BUTTON_TOKEN=.*|OPEN_BUTTON_TOKEN=$OPEN_BUTTON_TOKEN|" /etc/environment
+fi
+
+# 3. Create portal.yaml file (Vast.ai base image may read this)
+# Note: Vast.ai primarily uses PORTAL_CONFIG env var, but portal.yaml provides backup
+mkdir -p /etc
+# Write PORTAL_CONFIG in the expected string format
+cat > /etc/portal.yaml << EOF
+# Vast.ai Instance Portal Configuration
+# This file is a backup - PORTAL_CONFIG env var is the primary source
+# Format string: Interface:ExternalPort:InternalPort:Path:Name
+${PORTAL_CONFIG_VALUE}
+EOF
 
 # Export for current session
-export OPEN_BUTTON_PORT=1111
-export OPEN_BUTTON_TOKEN=1
+export OPEN_BUTTON_PORT
+export OPEN_BUTTON_TOKEN
 
 # Create supervisor scripts if supervisor directory exists
 if [ -d "/opt/supervisor-scripts" ]; then
