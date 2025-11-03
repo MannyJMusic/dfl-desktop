@@ -207,6 +207,18 @@ fi
 
 echo "Conda initialized successfully"
 
+# Deactivate any existing virtual environment (Vast.ai base image has /venv/main/)
+echo "Deactivating any existing virtual environments..."
+if [ -n "$VIRTUAL_ENV" ]; then
+    echo "Deactivating existing virtual environment: $VIRTUAL_ENV"
+    deactivate 2>/dev/null || true
+    unset VIRTUAL_ENV
+fi
+if [ -n "$CONDA_DEFAULT_ENV" ]; then
+    echo "Deactivating existing conda environment: $CONDA_DEFAULT_ENV"
+    conda deactivate 2>/dev/null || true
+fi
+
 # Create conda environment with Python 3.10
 # Note: Base image has CUDA 12.6.3 and cuDNN installed system-wide,
 # so TensorFlow will use system CUDA libraries.
@@ -227,7 +239,7 @@ fi
 
 # Create environment if it doesn't exist
 if [ ! -d "${CONDA_ENV_PATH}" ]; then
-    echo "Creating new conda environment at ${CONDA_ENV_PATH}..."
+    echo "Creating new conda environment named '${CONDA_ENV_NAME}' at ${CONDA_ENV_PATH}..."
     # Try to create environment with cudatoolkit for TensorFlow compatibility
     # If that fails, create basic Python environment (TensorFlow will use system CUDA)
     if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>&1; then
@@ -256,23 +268,37 @@ if [ ! -d "${CONDA_ENV_PATH}" ]; then
     echo "Conda environment created successfully at ${CONDA_ENV_PATH}"
 fi
 
-# Activate conda environment
-echo "Activating conda environment: ${CONDA_ENV_PATH}..."
-# Use conda activate with proper path
-if [ -f "${CONDA_ENV_PATH}/bin/activate" ]; then
-    source "${CONDA_ENV_PATH}/bin/activate"
-elif command -v conda &> /dev/null; then
-    conda activate ${CONDA_ENV_PATH}
-else
-    echo "Error: Cannot activate conda environment"
-    exit 1
+# Activate conda environment - ensure we use conda, not venv
+echo "Activating conda environment: ${CONDA_ENV_NAME} at ${CONDA_ENV_PATH}..."
+
+# First, ensure we're not in venv
+if [ -n "$VIRTUAL_ENV" ]; then
+    deactivate 2>/dev/null || true
+    unset VIRTUAL_ENV
 fi
 
-# Verify activation worked
-if [ -z "$CONDA_DEFAULT_ENV" ] && [ -z "$VIRTUAL_ENV" ]; then
-    # Try alternative activation method
-    export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
-    echo "Using PATH method to activate environment"
+# Use conda activate (preferred method for named environments)
+if command -v conda &> /dev/null; then
+    echo "Using conda activate to activate environment..."
+    conda activate ${CONDA_ENV_PATH} 2>&1
+    # Verify conda activation worked
+    if [ -n "$CONDA_DEFAULT_ENV" ] || [ -n "$CONDA_PREFIX" ]; then
+        echo "Conda environment activated via conda activate"
+        echo "Active environment: ${CONDA_DEFAULT_ENV:-${CONDA_PREFIX}}"
+    else
+        echo "Warning: conda activate didn't set environment variables, trying direct activation..."
+        # Fallback: activate directly
+        if [ -f "${CONDA_ENV_PATH}/bin/activate" ]; then
+            source "${CONDA_ENV_PATH}/bin/activate"
+        else
+            # Last resort: update PATH
+            export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
+            echo "Using PATH method to activate environment"
+        fi
+    fi
+else
+    echo "Error: conda command not found"
+    exit 1
 fi
 
 # Verify Python is available and from the correct environment
@@ -288,15 +314,37 @@ echo "Python version: ${PYTHON_VERSION}"
 echo "Python path: ${PYTHON_PATH}"
 echo "Expected path: ${CONDA_ENV_PATH}/bin/python"
 
-# Verify we're using the right Python
+# Verify we're using the right Python (from conda, not venv)
 if [[ "$PYTHON_PATH" != *"${CONDA_ENV_PATH}"* ]]; then
     echo "Warning: Python is not from the conda environment, forcing PATH update"
+    # Ensure we're not using venv
+    if [[ "$PYTHON_PATH" == *"/venv/"* ]]; then
+        echo "ERROR: Python is from venv instead of conda environment!"
+        echo "Deactivating venv and forcing conda environment..."
+        deactivate 2>/dev/null || true
+        unset VIRTUAL_ENV
+    fi
     export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
     PYTHON_PATH=$(which python)
     echo "Updated Python path: ${PYTHON_PATH}"
+    
+    # Final verification
+    if [[ "$PYTHON_PATH" != *"${CONDA_ENV_PATH}"* ]]; then
+        echo "ERROR: Failed to activate conda environment properly"
+        exit 1
+    fi
 fi
 
-echo "Conda environment activated successfully"
+# Verify we're NOT using venv
+if [ -n "$VIRTUAL_ENV" ]; then
+    echo "ERROR: Still in venv ($VIRTUAL_ENV) instead of conda environment!"
+    echo "Deactivating venv..."
+    deactivate 2>/dev/null || true
+    unset VIRTUAL_ENV
+    export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
+fi
+
+echo "Conda environment '${CONDA_ENV_NAME}' activated successfully at ${PYTHON_PATH}"
 
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
