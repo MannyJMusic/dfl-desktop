@@ -109,6 +109,12 @@ fi
 
 # 7) VNC setup (idempotent)
 mkdir -p /root/.vnc
+# Ensure vncpasswd tool exists
+if ! command -v vncpasswd >/dev/null 2>&1 && ! command -v tigervncpasswd >/dev/null 2>&1; then
+  log "Installing tigervnc-tools for vncpasswd"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update && apt-get install -y --no-install-recommends tigervnc-tools && apt-get clean && rm -rf /var/lib/apt/lists/* || true
+fi
 if [ ! -f /root/.vnc/passwd ]; then
   VNCPASSWD_CMD="$(command -v vncpasswd || command -v tigervncpasswd || echo vncpasswd)"
   echo "${VNC_PASSWORD:-deepfacelab}" | $VNCPASSWD_CMD -f > /root/.vnc/passwd
