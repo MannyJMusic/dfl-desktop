@@ -274,9 +274,25 @@ echo "Virtual environment ready for DeepFaceLab installation"
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install TensorFlow 2.13 with GPU support
-echo "Installing TensorFlow 2.13..."
-python -m pip install --no-cache-dir tensorflow==2.13.0
+# Check Python version
+PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+echo "Python version: ${PYTHON_VERSION}"
+
+# Install TensorFlow with GPU support (version depends on Python version)
+echo "Installing TensorFlow with GPU support..."
+# TensorFlow 2.13.0 doesn't support Python 3.12+, so use compatible version
+if python -m pip install --no-cache-dir tensorflow==2.13.0 2>&1; then
+    echo "TensorFlow 2.13.0 installed successfully"
+elif python -m pip install --no-cache-dir tensorflow==2.17.0 2>&1; then
+    echo "TensorFlow 2.17.0 installed successfully (fallback for Python 3.12+)"
+elif python -m pip install --no-cache-dir tensorflow==2.18.0 2>&1; then
+    echo "TensorFlow 2.18.0 installed successfully (fallback for Python 3.12+)"
+elif python -m pip install --no-cache-dir tensorflow 2>&1; then
+    echo "TensorFlow latest version installed successfully"
+else
+    echo "ERROR: Failed to install TensorFlow"
+    exit 1
+fi
 
 # Install DeepFaceLab Python dependencies
 echo "Installing DeepFaceLab dependencies..."
