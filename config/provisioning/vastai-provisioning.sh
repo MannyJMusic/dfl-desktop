@@ -207,103 +207,50 @@ fi
 
 echo "Conda initialized successfully"
 
-# Deactivate any existing virtual environment (Vast.ai base image has /venv/main/)
-echo "Deactivating any existing virtual environments..."
+# Use Vast.ai base image's venv instead of creating conda environment
+# The base image automatically activates /venv/main/ on SSH, so we'll install there
+echo "Using Vast.ai base image's venv for DeepFaceLab dependencies..."
+
+# Determine the venv path (Vast.ai base image uses /venv/main/)
+VENV_PATH="/venv/main"
 if [ -n "$VIRTUAL_ENV" ]; then
-    echo "Deactivating existing virtual environment: $VIRTUAL_ENV"
-    deactivate 2>/dev/null || true
-    unset VIRTUAL_ENV
-fi
-if [ -n "$CONDA_DEFAULT_ENV" ]; then
-    echo "Deactivating existing conda environment: $CONDA_DEFAULT_ENV"
-    conda deactivate 2>/dev/null || true
-fi
-
-# Create conda environment with Python 3.10
-# Note: Base image has CUDA 12.6.3 and cuDNN installed system-wide,
-# so TensorFlow will use system CUDA libraries.
-echo "Creating conda environment: ${CONDA_ENV_NAME}..."
-mkdir -p /opt/conda-envs
-
-# Check if environment already exists
-if [ -d "${CONDA_ENV_PATH}" ]; then
-    echo "Conda environment already exists at ${CONDA_ENV_PATH}"
-    echo "Verifying environment..."
-    if [ -f "${CONDA_ENV_PATH}/bin/python" ]; then
-        echo "Environment is valid, using existing installation"
-    else
-        echo "Environment directory exists but is invalid, recreating..."
-        rm -rf ${CONDA_ENV_PATH}
-    fi
-fi
-
-# Create environment if it doesn't exist
-if [ ! -d "${CONDA_ENV_PATH}" ]; then
-    echo "Creating new conda environment named '${CONDA_ENV_NAME}' at ${CONDA_ENV_PATH}..."
-    # Try to create environment with cudatoolkit for TensorFlow compatibility
-    # If that fails, create basic Python environment (TensorFlow will use system CUDA)
-    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>&1; then
-        echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
-        echo "TensorFlow will use system CUDA libraries from the base image."
-        if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge 2>&1; then
-            echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
-            if [ -f "${WORKSPACE_ROOT}/environment.yml" ]; then
-                conda env create -p ${CONDA_ENV_PATH} -f ${WORKSPACE_ROOT}/environment.yml 2>&1 || {
-                    echo "Error: All methods to create conda environment failed"
-                    exit 1
-                }
-            else
-                echo "Error: Cannot create conda environment and no environment.yml found"
-                exit 1
-            fi
-        fi
-    fi
-    
-    # Verify environment was created
-    if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
-        echo "Error: Conda environment was not created successfully"
-        exit 1
-    fi
-    
-    echo "Conda environment created successfully at ${CONDA_ENV_PATH}"
-fi
-
-# Activate conda environment - ensure we use conda, not venv
-echo "Activating conda environment: ${CONDA_ENV_NAME} at ${CONDA_ENV_PATH}..."
-
-# First, ensure we're not in venv
-if [ -n "$VIRTUAL_ENV" ]; then
-    deactivate 2>/dev/null || true
-    unset VIRTUAL_ENV
-fi
-
-# Use conda activate (preferred method for named environments)
-if command -v conda &> /dev/null; then
-    echo "Using conda activate to activate environment..."
-    conda activate ${CONDA_ENV_PATH} 2>&1
-    # Verify conda activation worked
-    if [ -n "$CONDA_DEFAULT_ENV" ] || [ -n "$CONDA_PREFIX" ]; then
-        echo "Conda environment activated via conda activate"
-        echo "Active environment: ${CONDA_DEFAULT_ENV:-${CONDA_PREFIX}}"
-    else
-        echo "Warning: conda activate didn't set environment variables, trying direct activation..."
-        # Fallback: activate directly
-        if [ -f "${CONDA_ENV_PATH}/bin/activate" ]; then
-            source "${CONDA_ENV_PATH}/bin/activate"
-        else
-            # Last resort: update PATH
-            export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
-            echo "Using PATH method to activate environment"
-        fi
+    VENV_PATH="$VIRTUAL_ENV"
+    echo "Using existing venv: ${VENV_PATH}"
+elif [ -d "/venv/main" ]; then
+    VENV_PATH="/venv/main"
+    echo "Using Vast.ai base image venv: ${VENV_PATH}"
+    # Activate it
+    if [ -f "/venv/main/bin/activate" ]; then
+        source /venv/main/bin/activate
     fi
 else
-    echo "Error: conda command not found"
+    echo "Warning: Vast.ai venv not found at /venv/main, checking workspace..."
+    # Check for workspace environment sync venv
+    if [ -d "${WORKSPACE_ROOT}/.environment_sync" ]; then
+        ENV_SYNC_DIR=$(find ${WORKSPACE_ROOT}/.environment_sync -type d -name "venv" -o -type d -name "main" 2>/dev/null | head -1)
+        if [ -n "$ENV_SYNC_DIR" ] && [ -f "${ENV_SYNC_DIR}/bin/activate" ]; then
+            VENV_PATH="$ENV_SYNC_DIR"
+            source "${ENV_SYNC_DIR}/bin/activate"
+            echo "Using workspace environment sync venv: ${VENV_PATH}"
+        fi
+    fi
+fi
+
+# Verify we have a venv and activate it
+if [ -n "$VIRTUAL_ENV" ]; then
+    VENV_PATH="$VIRTUAL_ENV"
+    echo "Virtual environment already active: ${VENV_PATH}"
+elif [ -f "${VENV_PATH}/bin/activate" ]; then
+    source "${VENV_PATH}/bin/activate"
+    echo "Activated venv: ${VENV_PATH}"
+else
+    echo "Error: Could not find or activate venv"
     exit 1
 fi
 
-# Verify Python is available and from the correct environment
+# Verify Python is available
 if ! command -v python &> /dev/null; then
-    echo "Error: python command not found after activating environment"
+    echo "Error: python command not found"
     exit 1
 fi
 
@@ -312,39 +259,17 @@ PYTHON_VERSION=$(python --version 2>&1)
 PYTHON_PATH=$(which python)
 echo "Python version: ${PYTHON_VERSION}"
 echo "Python path: ${PYTHON_PATH}"
-echo "Expected path: ${CONDA_ENV_PATH}/bin/python"
+echo "Virtual environment: ${VIRTUAL_ENV}"
 
-# Verify we're using the right Python (from conda, not venv)
-if [[ "$PYTHON_PATH" != *"${CONDA_ENV_PATH}"* ]]; then
-    echo "Warning: Python is not from the conda environment, forcing PATH update"
-    # Ensure we're not using venv
-    if [[ "$PYTHON_PATH" == *"/venv/"* ]]; then
-        echo "ERROR: Python is from venv instead of conda environment!"
-        echo "Deactivating venv and forcing conda environment..."
-        deactivate 2>/dev/null || true
-        unset VIRTUAL_ENV
-    fi
-    export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
+# Verify we're using venv Python
+if [[ "$PYTHON_PATH" != *"${VENV_PATH}"* ]] && [[ "$PYTHON_PATH" != *"venv"* ]]; then
+    echo "Warning: Python is not from venv, updating PATH..."
+    export PATH="${VENV_PATH}/bin:${PATH}"
     PYTHON_PATH=$(which python)
     echo "Updated Python path: ${PYTHON_PATH}"
-    
-    # Final verification
-    if [[ "$PYTHON_PATH" != *"${CONDA_ENV_PATH}"* ]]; then
-        echo "ERROR: Failed to activate conda environment properly"
-        exit 1
-    fi
 fi
 
-# Verify we're NOT using venv
-if [ -n "$VIRTUAL_ENV" ]; then
-    echo "ERROR: Still in venv ($VIRTUAL_ENV) instead of conda environment!"
-    echo "Deactivating venv..."
-    deactivate 2>/dev/null || true
-    unset VIRTUAL_ENV
-    export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
-fi
-
-echo "Conda environment '${CONDA_ENV_NAME}' activated successfully at ${PYTHON_PATH}"
+echo "Virtual environment ready for DeepFaceLab installation"
 
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
@@ -550,53 +475,22 @@ export OPEN_BUTTON_TOKEN
 
 # Supervisor scripts not needed - services are managed by the image startup script
 
-# Create environment setup script
+# Create environment setup script (for venv)
 cat > /opt/setup-dfl-env.sh << 'EOFSCRIPT'
 #!/bin/bash
-# Activate DeepFaceLab conda environment
-# First, deactivate any existing venv (Vast.ai base image activates /venv/main/)
-if [ -n "$VIRTUAL_ENV" ]; then
-    echo "Deactivating existing venv: $VIRTUAL_ENV"
-    deactivate 2>/dev/null || true
-    unset VIRTUAL_ENV
-fi
+# Activate DeepFaceLab venv environment
+# Vast.ai base image automatically activates /venv/main/ on SSH
 
-# Initialize conda
-CONDA_BASE=$(conda info --base 2>/dev/null || echo "/opt/miniconda3")
-if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
-    source "${CONDA_BASE}/etc/profile.d/conda.sh"
-else
-    echo "Error: Could not find conda.sh"
-    return 1
-fi
-
-# Activate conda environment
-CONDA_ENV_PATH="/opt/conda-envs/deepfacelab"
-if [ -d "${CONDA_ENV_PATH}" ]; then
-    conda activate ${CONDA_ENV_PATH} 2>&1
-    # Verify activation worked
-    if [ -z "$CONDA_DEFAULT_ENV" ] && [ -z "$CONDA_PREFIX" ]; then
-        # Fallback: update PATH directly
-        export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
-        echo "Using PATH method to activate conda environment"
+# Try to activate venv if not already active
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ -f "/venv/main/bin/activate" ]; then
+        source /venv/main/bin/activate
+    elif [ -d "${WORKSPACE_ROOT}/.environment_sync" ]; then
+        ENV_SYNC_DIR=$(find ${WORKSPACE_ROOT}/.environment_sync -type d -name "venv" -o -type d -name "main" 2>/dev/null | head -1)
+        if [ -n "$ENV_SYNC_DIR" ] && [ -f "${ENV_SYNC_DIR}/bin/activate" ]; then
+            source "${ENV_SYNC_DIR}/bin/activate"
+        fi
     fi
-    
-    # Final check: ensure we're not still using venv
-    if [ -n "$VIRTUAL_ENV" ]; then
-        deactivate 2>/dev/null || true
-        unset VIRTUAL_ENV
-        export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
-    fi
-    
-    # Verify Python is from conda environment
-    PYTHON_PATH=$(which python)
-    if [[ "$PYTHON_PATH" != *"${CONDA_ENV_PATH}"* ]]; then
-        export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
-        echo "Updated PATH to use conda environment"
-    fi
-else
-    echo "Error: Conda environment not found at ${CONDA_ENV_PATH}"
-    return 1
 fi
 
 # Set DeepFaceLab environment variables
@@ -606,43 +500,12 @@ export DFL_ROOT="/opt/DeepFaceLab/"
 export DFL_SRC="/opt/DeepFaceLab"
 cd /opt/DeepFaceLab
 
-echo "DeepFaceLab conda environment activated successfully"
+echo "DeepFaceLab environment ready"
 echo "Python: $(which python)"
 echo "Python version: $(python --version)"
-echo "Conda environment: ${CONDA_DEFAULT_ENV:-${CONDA_PREFIX}}"
+echo "Virtual environment: ${VIRTUAL_ENV:-/venv/main}"
 EOFSCRIPT
 chmod +x /opt/setup-dfl-env.sh
-
-# Also create a .bashrc addition to automatically activate conda environment
-cat > /root/.bashrc_dfl << 'EOFBASHRC'
-# DeepFaceLab conda environment auto-activation
-# This deactivates Vast.ai's venv and activates our conda environment
-if [ -n "$VIRTUAL_ENV" ] && [[ "$VIRTUAL_ENV" == *".environment_sync"* ]]; then
-    deactivate 2>/dev/null || true
-    unset VIRTUAL_ENV
-fi
-
-# Activate conda environment if not already activated
-if [ -z "$CONDA_DEFAULT_ENV" ] && [ -z "$CONDA_PREFIX" ]; then
-    CONDA_BASE=$(conda info --base 2>/dev/null || echo "/opt/miniconda3")
-    if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
-        source "${CONDA_BASE}/etc/profile.d/conda.sh"
-        CONDA_ENV_PATH="/opt/conda-envs/deepfacelab"
-        if [ -d "${CONDA_ENV_PATH}" ]; then
-            conda activate ${CONDA_ENV_PATH} 2>/dev/null || {
-                export PATH="${CONDA_ENV_PATH}/bin:${PATH}"
-            }
-        fi
-    fi
-fi
-EOFBASHRC
-
-# Append to existing .bashrc if not already present
-if ! grep -q ".bashrc_dfl" /root/.bashrc 2>/dev/null; then
-    echo "" >> /root/.bashrc
-    echo "# DeepFaceLab conda environment setup" >> /root/.bashrc
-    echo "source /root/.bashrc_dfl" >> /root/.bashrc
-fi
 
 # Note: DeepFaceLab, scripts, and workspace are now all at /opt/ level
 # - /opt/DeepFaceLab (actual copy)
@@ -653,13 +516,14 @@ echo "=== Provisioning Complete ==="
 echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
 echo "Scripts available at: ${SCRIPTS_PATH}"
 echo "Workspace available at: ${WORKSPACE_PATH} (symlinked to ${WORKSPACE_ROOT})"
-echo "Conda environment: ${CONDA_ENV_PATH}"
-echo "To activate: source /opt/setup-dfl-env.sh"
+echo "Virtual environment: ${VIRTUAL_ENV:-/venv/main}"
+echo "To setup environment: source /opt/setup-dfl-env.sh"
 echo ""
 echo "Structure:"
 echo "  /opt/DeepFaceLab/ - DeepFaceLab installation"
 echo "  /opt/scripts/ - Runtime scripts"
 echo "  /opt/workspace/ - Workspace (symlinked to mounted volume)"
+echo "  ${VIRTUAL_ENV:-/venv/main}/ - Python virtual environment with DeepFaceLab dependencies"
 
 # Ensure SSH is still running before exit
 if ! pgrep -x sshd > /dev/null 2>&1; then
