@@ -65,11 +65,30 @@ else
     source "$(conda info --base)/etc/profile.d/conda.sh"
 fi
 
-# Create conda environment with Python 3.10 and CUDA support
+# Create conda environment with Python 3.10
+# Note: Base image already has CUDA 12.6.3 and cuDNN installed system-wide,
+# so we don't need to install them via conda. TensorFlow will use system CUDA libraries.
 echo "Creating conda environment: ${CONDA_ENV_NAME}..."
 mkdir -p /opt/conda-envs
-conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 cudnn=8.6 -c nvidia -c conda-forge || \
-    conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml 2>/dev/null || true
+
+# Try to create environment with cudatoolkit for TensorFlow compatibility
+# If that fails, create basic Python environment (TensorFlow will use system CUDA)
+if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>/dev/null; then
+    echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
+    echo "TensorFlow will use system CUDA libraries from the base image."
+    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge; then
+        echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
+        if [ -f "/workspace/environment.yml" ]; then
+            conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml || {
+                echo "Error: All methods to create conda environment failed"
+                exit 1
+            }
+        else
+            echo "Error: Cannot create conda environment and no environment.yml found"
+            exit 1
+        fi
+    fi
+fi
 
 # Activate conda environment
 conda activate ${CONDA_ENV_PATH}
