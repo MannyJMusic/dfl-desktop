@@ -93,6 +93,64 @@ fi
 
 echo "SSH server configured and started"
 
+# Fix cron crash loop issue early (Vast.ai base image tries to manage cron but it conflicts with system cron)
+# This must be done early to prevent log spam and potential service conflicts
+echo "Fixing cron crash loop issue..."
+
+# First, try to stop via supervisorctl
+if command -v supervisorctl &> /dev/null; then
+    # Stop and remove cron service from supervisor
+    supervisorctl stop cron 2>/dev/null || true
+    supervisorctl remove cron 2>/dev/null || true
+fi
+
+# Disable cron in supervisor config files if they exist
+for SUPERVISOR_CONFIG in /etc/supervisor/conf.d/*.conf /etc/supervisord.conf; do
+    if [ -f "$SUPERVISOR_CONFIG" ]; then
+        # Comment out any cron program entries
+        sed -i 's/^\[program:cron\]/;[program:cron] DISABLED/' "$SUPERVISOR_CONFIG" 2>/dev/null || true
+        sed -i 's/^command=.*cron.*/;command=cron DISABLED/' "$SUPERVISOR_CONFIG" 2>/dev/null || true
+    fi
+done
+
+# Reload supervisor config after changes
+if command -v supervisorctl &> /dev/null; then
+    supervisorctl reread 2>/dev/null || true
+    supervisorctl update 2>/dev/null || true
+    # Make sure cron is still stopped
+    supervisorctl stop cron 2>/dev/null || true
+    supervisorctl remove cron 2>/dev/null || true
+fi
+
+# Kill any supervisor-spawned cron processes (but NOT the system cron daemon)
+# Find all cron processes and kill only those not started by systemd/init
+CRON_PIDS=$(pgrep -f "^/usr/sbin/cron" 2>/dev/null || true)
+if [ -n "$CRON_PIDS" ]; then
+    for CRON_PID in $CRON_PIDS; do
+        # Check if this is the system cron (usually PID 1 or started by init)
+        # If parent is supervisor, kill it
+        PARENT=$(ps -o ppid= -p "$CRON_PID" 2>/dev/null | tr -d ' ' || echo "")
+        if [ -n "$PARENT" ] && pgrep -f "supervisor" | grep -q "^${PARENT}$" 2>/dev/null; then
+            echo "Killing supervisor-managed cron process (PID: $CRON_PID)"
+            kill "$CRON_PID" 2>/dev/null || true
+        fi
+    done
+fi
+
+# Clean up stale cron lock files only if they're not from the system cron
+if [ -f /var/run/crond.pid ]; then
+    LOCK_PID=$(cat /var/run/crond.pid 2>/dev/null || echo "")
+    if [ -n "$LOCK_PID" ]; then
+        # Check if the lock PID is actually a running cron process
+        if ! ps -p "$LOCK_PID" > /dev/null 2>&1; then
+            echo "Cleaning up stale cron lock file (PID: $LOCK_PID is not running)"
+            rm -f /var/run/crond.pid
+        fi
+    fi
+fi
+
+echo "Cron crash loop fixed"
+
 # Install Miniconda if not present
 if ! command -v conda &> /dev/null; then
     echo "Installing Miniconda..."
@@ -362,24 +420,12 @@ EOF
     chmod +x /opt/supervisor-scripts/ssh.sh
 fi
 
-# Fix cron crash loop issue (Vast.ai base image tries to manage cron but it conflicts)
-# Stop the supervisor-managed cron service if it exists
+# Ensure cron is properly stopped (duplicate check in case supervisor restarted it)
+# This is a final safeguard after creating supervisor scripts
 if command -v supervisorctl &> /dev/null; then
-    # Stop cron service to prevent crash loop (system cron is already running)
     supervisorctl stop cron 2>/dev/null || true
     supervisorctl remove cron 2>/dev/null || true
-    # Reload supervisor config
-    supervisorctl reload || true
-fi
-
-# Ensure system cron can run properly by cleaning up any stale lock files
-if [ -f /var/run/crond.pid ]; then
-    # Check if the PID in the lock file is actually running
-    LOCK_PID=$(cat /var/run/crond.pid 2>/dev/null || echo "")
-    if [ -n "$LOCK_PID" ] && ! ps -p "$LOCK_PID" > /dev/null 2>&1; then
-        echo "Cleaning up stale cron lock file"
-        rm -f /var/run/crond.pid
-    fi
+    # Don't reload here as it might restart cron - just ensure it's stopped
 fi
 
 # Create environment setup script
