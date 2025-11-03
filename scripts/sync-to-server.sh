@@ -39,8 +39,14 @@ get_ssh_hosts() {
         return 1
     fi
     
-    # Extract host names from SSH config
-    hosts=$(grep -E "^Host " "$ssh_config" | sed 's/^Host //' | grep -v "^\*$" | tr '\n' ' ')
+    # Extract host names from SSH config (handle various whitespace formats)
+    # Match "Host" at start of line, possibly with leading whitespace
+    hosts=$(grep -E "^[[:space:]]*Host[[:space:]]+" "$ssh_config" | sed 's/^[[:space:]]*Host[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v "^\*$" | grep -v "^$" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    
+    if [ -z "$hosts" ]; then
+        return 1
+    fi
+    
     echo "$hosts"
 }
 
@@ -76,16 +82,21 @@ select_ssh_host() {
     echo ""
     
     # Get list of SSH hosts
-    hosts=$(get_ssh_hosts)
-    
-    if [ -z "$hosts" ]; then
+    if ! hosts=$(get_ssh_hosts 2>/dev/null) || [ -z "$hosts" ]; then
         print_warning "No hosts found in SSH config. Using manual entry."
-        return 1
+        manual_connection_entry
+        return 0
     fi
     
-    # Count hosts
+    # Count hosts (convert to array)
     host_array=($hosts)
     host_count=${#host_array[@]}
+    
+    if [ "$host_count" -eq 0 ]; then
+        print_warning "No hosts found in SSH config. Using manual entry."
+        manual_connection_entry
+        return 0
+    fi
     
     echo "Existing SSH connections:"
     echo ""
@@ -95,6 +106,12 @@ select_ssh_host() {
     declare -a host_names
     
     for host in $hosts; do
+        # Clean up host name (remove any trailing whitespace)
+        host=$(echo "$host" | sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//')
+        if [ -z "$host" ]; then
+            continue
+        fi
+        
         get_host_details "$host"
         host_names[$idx]="$host"
         
@@ -106,6 +123,10 @@ select_ssh_host() {
                 printf "  %d. %s\n" "$idx" "$host"
                 printf "     → %s (user: %s, port: %s)\n" "$SSH_HOSTNAME" "$SSH_USER" "$SSH_PORT"
             fi
+        else
+            # Still show host even if details aren't available
+            printf "  %d. %s\n" "$idx" "$host"
+            printf "     → (details unavailable)\n"
         fi
         echo ""
         ((idx++))
