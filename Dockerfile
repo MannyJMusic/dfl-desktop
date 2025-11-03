@@ -36,6 +36,10 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Copy provisioning scripts into the image so they can be invoked via --onstart-cmd
+COPY config/provisioning/ /opt/provisioning/
+RUN chmod -R +x /opt/provisioning/*.sh || true
+
 # Vast.ai base image handles the rest via provisioning script
 # The provisioning script (PROVISIONING_SCRIPT env var) will:
 # - Install and configure SSH server (openssh-server)

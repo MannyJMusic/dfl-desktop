@@ -136,9 +136,9 @@ vastai search offers 'geolocation=US gpu_ram>=48' -o dph
 You can also create an instance directly without a template:
 
 ```bash
-vastai create instance <OFFER_ID> \
+vastai create instance 25105506 \
   --image "mannyj37/dfl-desktop:latest" \
-  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab" \
   --disk 200 \
   --ssh \
   --direct
