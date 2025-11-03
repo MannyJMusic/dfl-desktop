@@ -38,6 +38,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 
 # Vast.ai base image handles the rest via provisioning script
 # The provisioning script (PROVISIONING_SCRIPT env var) will:
+# - Install and configure SSH server (openssh-server)
 # - Install conda and create deepfacelab environment
 # - Install system dependencies (git, VNC, desktop environment)
 # - Clone DFL-MVE repository

@@ -40,8 +40,58 @@ apt-get update && \
     xfce4-notifyd \
     kde-config-screenlocker \
     network-manager \
+    openssh-server \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure SSH server
+echo "Configuring SSH server..."
+mkdir -p /var/run/sshd
+mkdir -p /root/.ssh
+
+# Configure SSH for container use (allow root login, etc.)
+SSH_CONFIG_FILE="/etc/ssh/sshd_config"
+if [ -f "$SSH_CONFIG_FILE" ]; then
+    # Enable root login (needed for containers)
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    echo "PermitRootLogin yes" >> "$SSH_CONFIG_FILE"
+    
+    # Allow password authentication (for Vast.ai SSH key injection)
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    echo "PasswordAuthentication yes" >> "$SSH_CONFIG_FILE"
+    
+    # Ensure PubkeyAuthentication is enabled (for Vast.ai SSH keys)
+    grep -q "^PubkeyAuthentication" "$SSH_CONFIG_FILE" || echo "PubkeyAuthentication yes" >> "$SSH_CONFIG_FILE"
+    
+    # Disable strict mode checking (helps in container environments)
+    sed -i 's/#StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+    sed -i 's/StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null
+fi
+
+# Generate host keys if they don't exist (required for SSH server)
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+    echo "Generating SSH host keys..."
+    ssh-keygen -A
+fi
+
+# Start SSH service (Vast.ai base image should manage service lifecycle, but ensure it's available)
+if command -v service &> /dev/null; then
+    service ssh start || service sshd start || true
+elif command -v systemctl &> /dev/null; then
+    systemctl enable ssh || systemctl enable sshd || true
+    systemctl start ssh || systemctl start sshd || true
+else
+    # Manual start if service/systemctl not available (run in background)
+    if [ -f /usr/sbin/sshd ]; then
+        /usr/sbin/sshd &
+    elif [ -f /usr/bin/sshd ]; then
+        /usr/bin/sshd &
+    fi
+fi
+
+echo "SSH server configured and started"
 
 # Install Miniconda if not present
 if ! command -v conda &> /dev/null; then
@@ -237,8 +287,9 @@ echo "OPEN_BUTTON_TOKEN=1" >> /etc/environment
 export OPEN_BUTTON_PORT=1111
 export OPEN_BUTTON_TOKEN=1
 
-# Create supervisor script for VNC if needed
+# Create supervisor scripts if supervisor directory exists
 if [ -d "/opt/supervisor-scripts" ]; then
+    # Supervisor script for VNC
     cat > /opt/supervisor-scripts/vnc.sh << 'EOF'
 #!/bin/bash
 # Keep VNC server running
@@ -250,6 +301,27 @@ while true; do
 done
 EOF
     chmod +x /opt/supervisor-scripts/vnc.sh
+    
+    # Supervisor script for SSH
+    cat > /opt/supervisor-scripts/ssh.sh << 'EOF'
+#!/bin/bash
+# Keep SSH server running
+while true; do
+    if ! pgrep -f "sshd" > /dev/null; then
+        if command -v service &> /dev/null; then
+            service ssh start || service sshd start || true
+        elif command -v systemctl &> /dev/null; then
+            systemctl start ssh || systemctl start sshd || true
+        elif [ -f /usr/sbin/sshd ]; then
+            /usr/sbin/sshd &
+        elif [ -f /usr/bin/sshd ]; then
+            /usr/bin/sshd &
+        fi
+    fi
+    sleep 60
+done
+EOF
+    chmod +x /opt/supervisor-scripts/ssh.sh
 fi
 
 # Reload supervisor if it exists
