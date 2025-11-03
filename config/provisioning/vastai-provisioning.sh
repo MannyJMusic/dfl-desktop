@@ -44,58 +44,62 @@ apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure SSH server
-echo "Configuring SSH server..."
-mkdir -p /var/run/sshd
-mkdir -p /root/.ssh
-# Ensure /run/sshd exists with correct ownership/permissions (Ubuntu expects this path)
-mkdir -p /run/sshd
-chown root:root /run/sshd
-chmod 755 /run/sshd
-
-# Configure SSH for container use (allow root login, etc.)
-SSH_CONFIG_FILE="/etc/ssh/sshd_config"
-if [ -f "$SSH_CONFIG_FILE" ]; then
-    # Enable root login (needed for containers)
-    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    echo "PermitRootLogin yes" >> "$SSH_CONFIG_FILE"
-    
-    # Allow password authentication (for Vast.ai SSH key injection)
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    echo "PasswordAuthentication yes" >> "$SSH_CONFIG_FILE"
-    
-    # Ensure PubkeyAuthentication is enabled (for Vast.ai SSH keys)
-    grep -q "^PubkeyAuthentication" "$SSH_CONFIG_FILE" || echo "PubkeyAuthentication yes" >> "$SSH_CONFIG_FILE"
-    
-    # Disable strict mode checking (helps in container environments)
-    sed -i 's/#StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    sed -i 's/StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null
-fi
-
-# Generate host keys if they don't exist (required for SSH server)
-if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
-    echo "Generating SSH host keys..."
-    ssh-keygen -A
-fi
-
-# Start SSH service (Vast.ai base image should manage service lifecycle, but ensure it's available)
-if command -v service &> /dev/null; then
-    service ssh start || service sshd start || true
-elif command -v systemctl &> /dev/null; then
-    systemctl enable ssh || systemctl enable sshd || true
-    systemctl start ssh || systemctl start sshd || true
+# Configure SSH server (skip if already running)
+if pgrep -x sshd > /dev/null 2>&1 || ss -tlnp 2>/dev/null | grep -q "sshd"; then
+    echo "SSH server already running - skipping SSH configuration"
 else
-    # Manual start if service/systemctl not available (run in background)
-    if [ -f /usr/sbin/sshd ]; then
-        /usr/sbin/sshd &
-    elif [ -f /usr/bin/sshd ]; then
-        /usr/bin/sshd &
-    fi
-fi
+    echo "Configuring SSH server..."
+    mkdir -p /var/run/sshd
+    mkdir -p /root/.ssh
+    # Ensure /run/sshd exists with correct ownership/permissions (Ubuntu expects this path)
+    mkdir -p /run/sshd
+    chown root:root /run/sshd
+    chmod 755 /run/sshd
 
-echo "SSH server configured and started"
+    # Configure SSH for container use (allow root login, etc.)
+    SSH_CONFIG_FILE="/etc/ssh/sshd_config"
+    if [ -f "$SSH_CONFIG_FILE" ]; then
+        # Enable root login (needed for containers)
+        sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+        sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+        echo "PermitRootLogin yes" >> "$SSH_CONFIG_FILE"
+        
+        # Allow password authentication (for Vast.ai SSH key injection)
+        sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+        sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+        echo "PasswordAuthentication yes" >> "$SSH_CONFIG_FILE"
+        
+        # Ensure PubkeyAuthentication is enabled (for Vast.ai SSH keys)
+        grep -q "^PubkeyAuthentication" "$SSH_CONFIG_FILE" || echo "PubkeyAuthentication yes" >> "$SSH_CONFIG_FILE"
+        
+        # Disable strict mode checking (helps in container environments)
+        sed -i 's/#StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null || \
+        sed -i 's/StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null
+    fi
+
+    # Generate host keys if they don't exist (required for SSH server)
+    if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+        echo "Generating SSH host keys..."
+        ssh-keygen -A
+    fi
+
+    # Start SSH service (Vast.ai base image should manage service lifecycle, but ensure it's available)
+    if command -v service &> /dev/null; then
+        service ssh start || service sshd start || true
+    elif command -v systemctl &> /dev/null; then
+        systemctl enable ssh || systemctl enable sshd || true
+        systemctl start ssh || systemctl start sshd || true
+    else
+        # Manual start if service/systemctl not available (run in background)
+        if [ -f /usr/sbin/sshd ]; then
+            /usr/sbin/sshd &
+        elif [ -f /usr/bin/sshd ]; then
+            /usr/bin/sshd &
+        fi
+    fi
+
+    echo "SSH server configured and started"
+fi
 
 # Fix cron crash loop issue early (Vast.ai base image tries to manage cron but it conflicts with system cron)
 # This must be done early to prevent log spam and potential service conflicts
