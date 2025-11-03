@@ -187,11 +187,21 @@ vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
 
 # Set up PORTAL_CONFIG for Vast.ai Instance Portal
 # VNC typically runs on port 5901, mapping to external port
+# Instance Portal runs on port 11111 internally, accessible via port 1111 externally
 echo "Configuring Vast.ai Portal..."
 rm -f /etc/portal.yaml
-export PORTAL_CONFIG="localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal"
 
-# Configure Instance Portal open button
+# Write PORTAL_CONFIG to /etc/portal.yaml (Vast.ai reads this on startup)
+# Format: Interface:ExternalPort:InternalPort:Path:Name
+PORTAL_CONFIG_VALUE="localhost:5901:5901:/:VNC Desktop|localhost:1111:11111:/:Instance Portal"
+export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
+
+# Also write to /etc/environment so it persists and is available to all processes
+echo "PORTAL_CONFIG=\"$PORTAL_CONFIG_VALUE\"" >> /etc/environment
+echo "OPEN_BUTTON_PORT=1111" >> /etc/environment
+echo "OPEN_BUTTON_TOKEN=1" >> /etc/environment
+
+# Export for current session
 export OPEN_BUTTON_PORT=1111
 export OPEN_BUTTON_TOKEN=1
 
