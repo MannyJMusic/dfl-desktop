@@ -505,6 +505,177 @@ If the "Connect" or "Open" button in the Vast.ai console isn't working:
    - External port 1111 should map to internal port 11111
    - Check with: `docker ps` to see port mappings
 
+## Troubleshooting: Container Not Working
+
+If your container isn't working, check these common issues:
+
+### Issue 1: Incorrect `--env` Format
+
+**Wrong:**
+```bash
+--env '--gpus all --rm -it'
+```
+
+**Correct:**
+```bash
+--env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh"
+```
+
+**Explanation:**
+- `--gpus all` is automatically handled by Vast.ai on GPU instances
+- `--rm` and `-it` are Docker run flags that don't apply to Vast.ai instances
+- You need port mappings (`-p`) for VNC and Instance Portal
+- You need environment variables (`-e`) for VNC password and provisioning script
+
+### Issue 2: Missing Provisioning Script
+
+If your image is based on `vastai/base-image`, you must provide the `PROVISIONING_SCRIPT` environment variable, or the container won't set up properly.
+
+### Corrected Command Example
+
+For creating an instance with your custom image:
+
+```bash
+vastai create instance 13846455 \
+  --image "mannyj37/deepfacelab:latest-ubuntu" \
+  --env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab -e PROVISIONING_SCRIPT=https://raw.githubusercontent.com/MannyJMusic/dfl-desktop/refs/heads/main/config/provisioning/vastai-provisioning.sh" \
+  --create-volume 20118579 \
+  --volume-size 150 \
+  --mount-path /data/workspace \
+  --ssh \
+  --direct \
+  --disk 50
+```
+
+### Viewing Logs to Diagnose Issues
+
+After creating the instance, check the logs:
+
+```bash
+# View recent logs
+vastai logs <INSTANCE_ID>
+
+# Stream logs in real-time (SSH into instance first)
+$(vastai ssh-url <INSTANCE_ID>)
+docker logs -f <CONTAINER_ID>
+```
+
+Look for:
+- Provisioning script execution errors
+- Port binding issues
+- Environment variable problems
+- Service startup failures
+
+## Machine-Specific Compatibility Issues
+
+If the **same command worked on a different machine** but fails on a new one, it's likely a machine-specific compatibility issue:
+
+### Issue 1: CUDA/Driver Version Mismatch
+
+Your Docker image uses `vastai/base-image:cuda-12.6.3-cudnn-devel-ubuntu22.04-py313`, which requires:
+- **CUDA 12.6.3** support
+- Compatible NVIDIA drivers (typically 550+)
+
+**Check machine compatibility:**
+```bash
+# SSH into the Vast.ai machine (not container)
+$(vastai ssh-url <INSTANCE_ID>)
+
+# On the host machine, check CUDA/driver version
+nvidia-smi
+cat /usr/local/cuda/version.txt 2>/dev/null || echo "CUDA version file not found"
+```
+
+**Solutions:**
+1. Use a machine with compatible CUDA drivers (check machine specs before creating instance)
+2. Search for machines with specific CUDA version:
+   ```bash
+   vastai search offers 'cuda>=12.0' -o dph
+   ```
+
+### Issue 2: Docker Version Differences
+
+Different Vast.ai machines may have different Docker versions or configurations.
+
+**Check Docker version on the machine:**
+```bash
+# After SSH into instance, check Docker
+docker --version
+docker info | grep -i version
+```
+
+### Issue 3: Image Architecture Compatibility
+
+Your image is built for `linux/amd64`. Some older machines might have architecture issues.
+
+**Verify image architecture:**
+```bash
+docker inspect mannyj37/deepfacelab:latest-ubuntu | grep Architecture
+```
+
+### Issue 4: Base Image Tag Differences
+
+The `vastai/base-image` tag might behave differently on different machines.
+
+**Solution: Use specific base image tag:**
+- Try using `vastai/base-image:@vastai-automatic-tag` instead of a specific CUDA version
+- Or use the exact base image that worked on the previous machine
+
+### Issue 5: Command Format Tolerances
+
+Some Vast.ai machines/machine configurations are more lenient with command formats. While `--env '--gpus all --rm -it'` might work on some machines, it's not the correct format and should be fixed.
+
+**Best Practice:** Always use the correct format regardless of what worked before:
+```bash
+# Correct format (should work on all machines)
+--env "-p 5901 -p 11111 -e VNC_PASSWORD=deepfacelab -e PROVISIONING_SCRIPT=..."
+```
+
+### Diagnostic Steps
+
+1. **Check the actual error logs:**
+   ```bash
+   vastai logs <INSTANCE_ID>
+   ```
+
+2. **Compare machine specs:**
+   ```bash
+   # Before creating instance, check machine details
+   vastai show offers <OFFER_ID>
+   ```
+
+3. **Test with base image first:**
+   ```bash
+   # Try creating instance with just the Vast.ai base image
+   vastai create instance <OFFER_ID> \
+     --image "vastai/base-image:@vastai-automatic-tag" \
+     --env "-p 5901 -p 11111" \
+     --disk 50 \
+     --ssh \
+     --direct
+   ```
+
+4. **Check container startup:**
+   ```bash
+   # After instance creation, SSH and check container status
+   $(vastai ssh-url <INSTANCE_ID>)
+   docker ps -a
+   docker logs <CONTAINER_ID>
+   ```
+
+### If Same Command Worked Before
+
+**Most likely causes:**
+1. **Different CUDA/driver versions** between machines (most common)
+2. **Different Vast.ai base image versions** on different machines
+3. **Machine-specific Docker/container runtime configurations**
+
+**Recommended approach:**
+1. Check logs first: `vastai logs <INSTANCE_ID>`
+2. Verify machine CUDA compatibility before creating instance
+3. Use the corrected command format (even if old format worked before)
+4. If needed, search for machines with specific CUDA versions that match your image
+
 ## Access VNC Desktop
 
 Once the instance is running and the provisioning script has completed:

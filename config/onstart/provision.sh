@@ -128,12 +128,30 @@ pgrep -f "vncserver :1" >/dev/null 2>&1 || vncserver :1 -geometry 1920x1080 -dep
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate /opt/conda-envs/deepfacelab
 export DFL_PYTHON=python
-export DFL_WORKSPACE=/opt/DFL-MVE/DeepFaceLab/workspace/
-export DFL_ROOT=/opt/DFL-MVE/DeepFaceLab/
-export DFL_SRC=/opt/DFL-MVE/DeepFaceLab/DeepFaceLab
-cd /opt/DFL-MVE/DeepFaceLab
+export DFL_WORKSPACE=/opt/workspace/
+export DFL_ROOT=/opt/DeepFaceLab/
+export DFL_SRC=/opt/DeepFaceLab/DeepFaceLab
+cd /opt/scripts
 EOS
 chmod +x /opt/setup-dfl-env.sh
+
+# 9) Setup .bashrc for automatic conda activation and directory change on SSH login
+if ! grep -q "DFL auto-setup" /root/.bashrc 2>/dev/null; then
+  cat >> /root/.bashrc <<'BASHRC_EOF'
+
+# DFL auto-setup: Initialize conda and activate deepfacelab environment on SSH login
+if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
+    source /opt/miniconda3/etc/profile.d/conda.sh
+    # Try to activate conda environment (either path-based or name-based)
+    conda activate /opt/conda-envs/deepfacelab 2>/dev/null || conda activate deepfacelab 2>/dev/null || true
+fi
+# Change to scripts directory on SSH login
+if [ -d /opt/scripts ]; then
+    cd /opt/scripts
+fi
+BASHRC_EOF
+  log "Added auto-setup to .bashrc"
+fi
 
 log "on-start provisioning complete"
 

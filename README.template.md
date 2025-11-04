@@ -45,3 +45,4 @@ cd /opt/DFL-MVE/DeepFaceLab
 - You can view recent logs with the Vast.ai CLI and/or `docker logs` via SSH.
 
 
+

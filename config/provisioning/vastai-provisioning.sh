@@ -52,178 +52,24 @@ apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure SSH server
-echo "Configuring SSH server..."
-mkdir -p /var/run/sshd /root/.ssh /run/sshd
-chown root:root /run/sshd
-chmod 755 /run/sshd
 
-# Configure SSH for container use
-SSH_CONFIG_FILE="/etc/ssh/sshd_config"
-if [ -f "$SSH_CONFIG_FILE" ]; then
-    # Enable root login (needed for containers)
-    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    echo "PermitRootLogin yes" >> "$SSH_CONFIG_FILE"
-    
-    # Allow password authentication
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    echo "PasswordAuthentication yes" >> "$SSH_CONFIG_FILE"
-    
-    # Ensure PubkeyAuthentication is enabled
-    grep -q "^PubkeyAuthentication" "$SSH_CONFIG_FILE" || echo "PubkeyAuthentication yes" >> "$SSH_CONFIG_FILE"
-    
-    # Disable strict mode checking
-    sed -i 's/#StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null || \
-    sed -i 's/StrictModes yes/StrictModes no/' "$SSH_CONFIG_FILE" 2>/dev/null
-fi
+# Install Miniconda
+echo "Installing Miniconda..."
+wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/miniconda3
+rm Miniconda3-latest-Linux-x86_64.sh
 
-# Generate host keys if they don't exist
-if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
-    echo "Generating SSH host keys..."
-    ssh-keygen -A
-fi
+# Initialize conda for bash
+/opt/miniconda3/bin/conda init bash
 
-# Start SSH service (in background so script can continue and exit)
-if command -v service &> /dev/null; then
-    service ssh start || service sshd start || true
-elif [ -f /usr/sbin/sshd ]; then
-    /usr/sbin/sshd &
-elif [ -f /usr/bin/sshd ]; then
-    /usr/bin/sshd &
-fi
-echo "SSH server configured and started"
-# Ensure SSH continues running in background after script exits
+# Source conda.sh to use conda in this script
+source /opt/miniconda3/etc/profile.d/conda.sh
 
-# Fix cron crash loop issue early (Vast.ai base image tries to manage cron but it conflicts with system cron)
-# This must be done early to prevent log spam and potential service conflicts
-echo "Fixing cron crash loop issue..."
-
-# First, try to stop via supervisorctl
-if command -v supervisorctl &> /dev/null; then
-    # Stop and remove cron service from supervisor
-    supervisorctl stop cron 2>/dev/null || true
-    supervisorctl remove cron 2>/dev/null || true
-fi
-
-# Disable cron in supervisor config files if they exist
-for SUPERVISOR_CONFIG in /etc/supervisor/conf.d/*.conf /etc/supervisord.conf; do
-    if [ -f "$SUPERVISOR_CONFIG" ]; then
-        # Comment out any cron program entries
-        sed -i 's/^\[program:cron\]/;[program:cron] DISABLED/' "$SUPERVISOR_CONFIG" 2>/dev/null || true
-        sed -i 's/^command=.*cron.*/;command=cron DISABLED/' "$SUPERVISOR_CONFIG" 2>/dev/null || true
-    fi
-done
-
-# Reload supervisor config after changes
-if command -v supervisorctl &> /dev/null; then
-    # Remove any dedicated cron program file if present to avoid parse errors
-    if [ -f "/etc/supervisor/conf.d/cron.conf" ]; then
-        rm -f /etc/supervisor/conf.d/cron.conf || true
-    fi
-    supervisorctl reread 2>/dev/null || true
-    supervisorctl update 2>/dev/null || true
-    # Make sure cron is still stopped
-    supervisorctl stop cron 2>/dev/null || true
-    supervisorctl remove cron 2>/dev/null || true
-fi
-
-# Kill any supervisor-spawned cron processes (but NOT the system cron daemon)
-# Find all cron processes and kill only those not started by systemd/init
-CRON_PIDS=$(pgrep -f "^/usr/sbin/cron" 2>/dev/null || true)
-if [ -n "$CRON_PIDS" ]; then
-    for CRON_PID in $CRON_PIDS; do
-        # Check if this is the system cron (usually PID 1 or started by init)
-        # If parent is supervisor, kill it
-        PARENT=$(ps -o ppid= -p "$CRON_PID" 2>/dev/null | tr -d ' ' || echo "")
-        if [ -n "$PARENT" ] && pgrep -f "supervisor" | grep -q "^${PARENT}$" 2>/dev/null; then
-            echo "Killing supervisor-managed cron process (PID: $CRON_PID)"
-            kill "$CRON_PID" 2>/dev/null || true
-        fi
-    done
-fi
-
-# Clean up stale cron lock files only if they're not from the system cron
-if [ -f /var/run/crond.pid ]; then
-    LOCK_PID=$(cat /var/run/crond.pid 2>/dev/null || echo "")
-    if [ -n "$LOCK_PID" ]; then
-        # Check if the lock PID is actually a running cron process
-        if ! ps -p "$LOCK_PID" > /dev/null 2>&1; then
-            echo "Cleaning up stale cron lock file (PID: $LOCK_PID is not running)"
-            rm -f /var/run/crond.pid
-        fi
-    fi
-fi
-
-echo "Cron crash loop fixed"
-
-# Skip conda installation - using Vast.ai base image's venv instead
-echo "Using Vast.ai base image's venv (no conda needed)"
-
-# Use Vast.ai base image's venv instead of creating conda environment
-# The base image automatically activates /venv/main/ on SSH, so we'll install there
-echo "Using Vast.ai base image's venv for DeepFaceLab dependencies..."
-
-# Determine the venv path (Vast.ai base image uses /venv/main/)
-VENV_PATH="/venv/main"
-if [ -n "$VIRTUAL_ENV" ]; then
-    VENV_PATH="$VIRTUAL_ENV"
-    echo "Using existing venv: ${VENV_PATH}"
-elif [ -d "/venv/main" ]; then
-    VENV_PATH="/venv/main"
-    echo "Using Vast.ai base image venv: ${VENV_PATH}"
-    # Activate it
-    if [ -f "/venv/main/bin/activate" ]; then
-        source /venv/main/bin/activate
-    fi
-else
-    echo "Warning: Vast.ai venv not found at /venv/main, checking workspace..."
-    # Check for workspace environment sync venv
-    if [ -d "${WORKSPACE_ROOT}/.environment_sync" ]; then
-        ENV_SYNC_DIR=$(find ${WORKSPACE_ROOT}/.environment_sync -type d -name "venv" -o -type d -name "main" 2>/dev/null | head -1)
-        if [ -n "$ENV_SYNC_DIR" ] && [ -f "${ENV_SYNC_DIR}/bin/activate" ]; then
-            VENV_PATH="$ENV_SYNC_DIR"
-            source "${ENV_SYNC_DIR}/bin/activate"
-            echo "Using workspace environment sync venv: ${VENV_PATH}"
-        fi
-    fi
-fi
-
-# Verify we have a venv and activate it
-if [ -n "$VIRTUAL_ENV" ]; then
-    VENV_PATH="$VIRTUAL_ENV"
-    echo "Virtual environment already active: ${VENV_PATH}"
-elif [ -f "${VENV_PATH}/bin/activate" ]; then
-    source "${VENV_PATH}/bin/activate"
-    echo "Activated venv: ${VENV_PATH}"
-else
-    echo "Error: Could not find or activate venv"
-    exit 1
-fi
-
-# Verify Python is available
-if ! command -v python &> /dev/null; then
-    echo "Error: python command not found"
-    exit 1
-fi
-
-# Check Python version and location
-PYTHON_VERSION=$(python --version 2>&1)
-PYTHON_PATH=$(which python)
-echo "Python version: ${PYTHON_VERSION}"
-echo "Python path: ${PYTHON_PATH}"
-echo "Virtual environment: ${VIRTUAL_ENV}"
-
-# Verify we're using venv Python
-if [[ "$PYTHON_PATH" != *"${VENV_PATH}"* ]] && [[ "$PYTHON_PATH" != *"venv"* ]]; then
-    echo "Warning: Python is not from venv, updating PATH..."
-    export PATH="${VENV_PATH}/bin:${PATH}"
-    PYTHON_PATH=$(which python)
-    echo "Updated Python path: ${PYTHON_PATH}"
-fi
-
-echo "Virtual environment ready for DeepFaceLab installation"
+# Create conda environment (use path-based for consistency)
+echo "Creating conda environment..."
+mkdir -p /opt/conda-envs
+conda create -y -p /opt/conda-envs/${CONDA_ENV_NAME} python=3.10
+conda activate /opt/conda-envs/${CONDA_ENV_NAME}
 
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
@@ -420,108 +266,29 @@ else
     echo "You may need to upload it or configure download URL"
 fi
 
-# VNC setup skipped - not needed for this configuration
 
-# Set up PORTAL_CONFIG for Vast.ai Instance Portal (if not already set)
-# Instance Portal runs on port 11111 internally, accessible via port 1111 externally
-echo "Configuring Vast.ai Portal..."
-
-# Determine external ports assigned by Vast.ai (fallbacks to standard)
-EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
-
-# Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
-# Only set if PORTAL_CONFIG is not already provided via environment variable
-if [ -z "$PORTAL_CONFIG" ]; then
-    DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
-    PORTAL_CONFIG_VALUE="$DEFAULT_PORTAL_CONFIG"
-    export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
-else
-    PORTAL_CONFIG_VALUE="$PORTAL_CONFIG"
-    echo "Using existing PORTAL_CONFIG: $PORTAL_CONFIG_VALUE"
-fi
-
-# Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
-# 1. /etc/environment (for system-wide environment variables)
-#    Use a safe replace that doesn't break on '|' or '/' in values
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^PORTAL_CONFIG=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
-
-# 2. Ensure OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN are set
-OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-$EXTERNAL_PORTAL_PORT}"
-OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
-
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^OPEN_BUTTON_PORT=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'OPEN_BUTTON_PORT=%s\n' "$OPEN_BUTTON_PORT" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
-
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^OPEN_BUTTON_TOKEN=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'OPEN_BUTTON_TOKEN=%s\n' "$OPEN_BUTTON_TOKEN" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
-
-# 3. Create portal.yaml file (Vast.ai base image may read this)
-# Note: Vast.ai primarily uses PORTAL_CONFIG env var, but portal.yaml provides backup
-mkdir -p /etc
-# Write PORTAL_CONFIG in the expected string format
-cat > /etc/portal.yaml << EOF
-# Vast.ai Instance Portal Configuration
-# This file is a backup - PORTAL_CONFIG env var is the primary source
-# Format string: Interface:ExternalPort:InternalPort:Path:Name
-${PORTAL_CONFIG_VALUE}
-EOF
-
-# Export for current session
-export OPEN_BUTTON_PORT
-export OPEN_BUTTON_TOKEN
 
 # Supervisor scripts not needed - services are managed by the image startup script
+# Note: Environment setup script (/opt/setup-dfl-env.sh) is created by config/onstart/provision.sh
 
-# Create environment setup script (for venv)
-cat > /opt/setup-dfl-env.sh << 'EOFSCRIPT'
-#!/bin/bash
-# Activate DeepFaceLab venv environment
-# Vast.ai base image automatically activates /venv/main/ on SSH
+# Setup .bashrc for automatic conda activation and directory change on SSH login
+echo "Configuring .bashrc for automatic environment setup..."
+if ! grep -q "DFL auto-setup" /root/.bashrc 2>/dev/null; then
+    cat >> /root/.bashrc <<'BASHRC_EOF'
 
-# Try to activate venv if not already active
-if [ -z "$VIRTUAL_ENV" ]; then
-    if [ -f "/venv/main/bin/activate" ]; then
-        source /venv/main/bin/activate
-    elif [ -d "${WORKSPACE_ROOT}/.environment_sync" ]; then
-        ENV_SYNC_DIR=$(find ${WORKSPACE_ROOT}/.environment_sync -type d -name "venv" -o -type d -name "main" 2>/dev/null | head -1)
-        if [ -n "$ENV_SYNC_DIR" ] && [ -f "${ENV_SYNC_DIR}/bin/activate" ]; then
-            source "${ENV_SYNC_DIR}/bin/activate"
-        fi
-    fi
+# DFL auto-setup: Initialize conda and activate deepfacelab environment on SSH login
+if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
+    source /opt/miniconda3/etc/profile.d/conda.sh
+    # Try to activate conda environment (either path-based or name-based)
+    conda activate /opt/conda-envs/deepfacelab 2>/dev/null || conda activate deepfacelab 2>/dev/null || true
 fi
-
-# Set DeepFaceLab environment variables
-export DFL_PYTHON="python"
-export DFL_WORKSPACE="/opt/workspace/"
-export DFL_ROOT="/opt/DeepFaceLab/"
-export DFL_SRC="/opt/DeepFaceLab"
-cd /opt/DeepFaceLab
-
-echo "DeepFaceLab environment ready"
-echo "Python: $(which python)"
-echo "Python version: $(python --version)"
-echo "Virtual environment: ${VIRTUAL_ENV:-/venv/main}"
-EOFSCRIPT
-chmod +x /opt/setup-dfl-env.sh
+# Change to scripts directory on SSH login
+if [ -d /opt/scripts ]; then
+    cd /opt/scripts
+fi
+BASHRC_EOF
+    echo "Added auto-setup to .bashrc"
+fi
 
 # Note: DeepFaceLab, scripts, and workspace are now all at /opt/ level
 # - /opt/DeepFaceLab (actual copy)
@@ -532,36 +299,16 @@ echo "=== Provisioning Complete ==="
 echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
 echo "Scripts available at: ${SCRIPTS_PATH}"
 echo "Workspace available at: ${WORKSPACE_PATH} (symlinked to ${WORKSPACE_ROOT})"
-echo "Virtual environment: ${VIRTUAL_ENV:-/venv/main}"
+echo "Conda environment: ${CONDA_ENV_NAME} (activate with: conda activate ${CONDA_ENV_NAME})"
 echo "To setup environment: source /opt/setup-dfl-env.sh"
 echo ""
 echo "Structure:"
 echo "  /opt/DeepFaceLab/ - DeepFaceLab installation"
 echo "  /opt/scripts/ - Runtime scripts"
 echo "  /opt/workspace/ - Workspace (symlinked to mounted volume)"
-echo "  ${VIRTUAL_ENV:-/venv/main}/ - Python virtual environment with DeepFaceLab dependencies"
+echo "  Conda environment '${CONDA_ENV_NAME}' - Python environment with DeepFaceLab dependencies"
 
-# Ensure SSH is still running before exit
-if ! pgrep -x sshd > /dev/null 2>&1; then
-    echo "Ensuring SSH is running before exit..."
-    if command -v service &> /dev/null; then
-        service ssh start || service sshd start || true
-        if ! pgrep -x sshd > /dev/null 2>&1; then
-            if [ -f /usr/sbin/sshd ]; then
-                /usr/sbin/sshd &
-            elif [ -f /usr/bin/sshd ]; then
-                /usr/bin/sshd &
-            fi
-        fi
-    else
-        if [ -f /usr/sbin/sshd ]; then
-            /usr/sbin/sshd &
-        elif [ -f /usr/bin/sshd ]; then
-            /usr/bin/sshd &
-        fi
-    fi
-    sleep 2
-fi
+
 
 # Exit cleanly - script is done, services run in background
 exit 0
