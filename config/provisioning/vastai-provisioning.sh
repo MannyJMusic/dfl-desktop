@@ -32,16 +32,14 @@ apt-get update && \
     libxrender-dev \
     libgomp1 \
     kde-plasma-desktop \
+    kde-standard \
+    kde-config-screenlocker \
     tigervnc-standalone-server \
     tigervnc-tools \
     tigervnc-xorg-extension \
     tigervnc-common \
     dbus-x11 \
     x11-xserver-utils \
-    xfce4 \
-    xfce4-goodies \
-    xfce4-notifyd \
-    kde-config-screenlocker \
     websockify \
     novnc \
     network-manager \
@@ -313,7 +311,7 @@ echo "${VNC_PASSWORD}" | ${VNCPASSWD_CMD} -f > ${VNC_HOME}/.vnc/passwd
 chmod 600 ${VNC_HOME}/.vnc/passwd
 echo "VNC password configured (from VNC_PASSWORD env var or default)"
 
-# Create xstartup script for XFCE4 Desktop Environment
+# Create xstartup script for KDE Plasma Desktop Environment
 cat > ${VNC_HOME}/.vnc/xstartup << 'EOF'
 #!/bin/bash
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
@@ -322,18 +320,30 @@ export XKL_XMODMAP_DISABLE=1
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 
-# Start D-Bus session
+# Start D-Bus session (required for KDE Plasma)
 if [ -x /usr/bin/dbus-launch ]; then
     eval $(dbus-launch --sh-syntax)
     export DBUS_SESSION_BUS_ADDRESS
     export DBUS_SESSION_BUS_PID
 fi
 
-# Start XFCE4 Desktop Environment
-if [ -x /usr/bin/startxfce4 ]; then
-    /usr/bin/startxfce4 &
+# Set KDE environment variables for VNC
+export XDG_SESSION_TYPE=x11
+export XDG_CURRENT_DESKTOP=KDE
+export KDE_SESSION_VERSION=5
+
+# Configure KDE for VNC (disable features that don't work well in VNC)
+export QT_QPA_PLATFORM=xcb
+export QT_X11_NO_MITSHM=1
+
+# Start KDE Plasma Desktop Environment
+if [ -x /usr/bin/startplasma-x11 ]; then
+    /usr/bin/startplasma-x11 &
+elif [ -x /usr/bin/startkde ]; then
+    /usr/bin/startkde &
 else
     # Fallback to simple window manager
+    echo "Warning: KDE Plasma not found, using fallback window manager"
     [ -x /usr/bin/twm ] && /usr/bin/twm &
     [ -x /usr/bin/xterm ] && /usr/bin/xterm -geometry 80x24+10+10 -ls &
 fi
@@ -343,6 +353,31 @@ wait
 EOF
 
 chmod +x ${VNC_HOME}/.vnc/xstartup
+
+# Configure KDE Plasma for VNC environment
+echo "Configuring KDE Plasma for VNC..."
+mkdir -p ${VNC_HOME}/.config
+
+# Create KDE configuration to optimize for VNC
+cat > ${VNC_HOME}/.config/kdeglobals << 'EOF'
+[KDE]
+SingleClick=false
+EOF
+
+# Disable screen locking in VNC (can cause issues)
+cat > ${VNC_HOME}/.config/kscreenlockerrc << 'EOF'
+[Daemon]
+Autolock=false
+LockOnResume=false
+EOF
+
+# Set KDE to use X11 session (required for VNC)
+mkdir -p ${VNC_HOME}/.config/plasma-workspace/env
+cat > ${VNC_HOME}/.config/plasma-workspace/env/set_window_manager.sh << 'EOF'
+#!/bin/bash
+export KDEWM=kwin
+EOF
+chmod +x ${VNC_HOME}/.config/plasma-workspace/env/set_window_manager.sh 2>/dev/null || true
 
 # Start VNC server in background
 echo "Starting VNC server..."
