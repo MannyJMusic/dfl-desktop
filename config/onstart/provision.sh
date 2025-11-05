@@ -66,8 +66,13 @@ if ! command -v conda >/dev/null 2>&1; then
   # Configure conda to use conda-forge (no ToS required)
   source /opt/miniconda3/etc/profile.d/conda.sh
   conda config --set channel_priority strict
-  conda config --add channels conda-forge
-  conda config --remove channels defaults || true
+  # Remove Anaconda channels that require ToS acceptance
+  conda config --remove channels https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+  conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+  conda config --remove channels defaults 2>/dev/null || true
+  # Add conda-forge (idempotent)
+  conda config --add channels conda-forge 2>/dev/null || true
+  conda config --set channel_priority strict
 fi
 source /opt/miniconda3/etc/profile.d/conda.sh
 
@@ -76,10 +81,13 @@ if [ ! -d /opt/conda-envs/deepfacelab ]; then
   mkdir -p /opt/conda-envs
   # Ensure conda-forge is configured (in case conda was already installed)
   conda config --set channel_priority strict 2>/dev/null || true
-  conda config --add channels conda-forge 2>/dev/null || true
+  # Remove Anaconda channels that require ToS acceptance
+  conda config --remove channels https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+  conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
   conda config --remove channels defaults 2>/dev/null || true
-  conda create -y -p /opt/conda-envs/deepfacelab python=3.10 cudatoolkit=11.8 -c conda-forge || \
-  conda create -y -p /opt/conda-envs/deepfacelab python=3.10 -c conda-forge
+  conda config --add channels conda-forge 2>/dev/null || true
+  conda create -y -p /opt/conda-envs/deepfacelab python=3.10 cudatoolkit=11.8 -c conda-forge --override-channels || \
+  conda create -y -p /opt/conda-envs/deepfacelab python=3.10 -c conda-forge --override-channels
   log "conda env created"
 fi
 conda activate /opt/conda-envs/deepfacelab || true

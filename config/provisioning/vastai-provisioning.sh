@@ -68,13 +68,19 @@ source /opt/miniconda3/etc/profile.d/conda.sh
 # Configure conda to use conda-forge (no ToS required) instead of default Anaconda channels
 echo "Configuring conda to use conda-forge..."
 conda config --set channel_priority strict
-conda config --add channels conda-forge
-conda config --remove channels defaults || true
+# Remove Anaconda channels that require ToS acceptance
+conda config --remove channels https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+conda config --remove channels defaults 2>/dev/null || true
+# Add conda-forge (idempotent - won't error if already present)
+conda config --add channels conda-forge 2>/dev/null || true
+# Ensure conda-forge is the only channel
+conda config --set channel_priority strict
 
 # Create conda environment (use path-based for consistency)
 echo "Creating conda environment..."
 mkdir -p /opt/conda-envs
-conda create -y -p /opt/conda-envs/${CONDA_ENV_NAME} python=3.10 -c conda-forge
+conda create -y -p /opt/conda-envs/${CONDA_ENV_NAME} python=3.10 -c conda-forge --override-channels
 conda activate /opt/conda-envs/${CONDA_ENV_NAME}
 
 # Upgrade pip
