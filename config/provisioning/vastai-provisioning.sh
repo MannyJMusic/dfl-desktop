@@ -449,15 +449,29 @@ EOF
 # Start websockify to forward port 6901 to VNC server on port 5901
 if command -v websockify &> /dev/null; then
     echo "Starting websockify on port 6901..."
+    # Kill any existing websockify processes on port 6901
+    pkill -f "websockify.*6901" 2>/dev/null || true
+    sleep 1
+    
     # Use novnc directory if it exists, otherwise use websockify without web files
+    # Bind to 0.0.0.0 to make it accessible from outside the container
     if [ -d /usr/share/novnc ]; then
-        nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+        nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
     else
         # Fallback: use websockify without web interface (raw VNC over WebSocket)
         echo "Warning: novnc web files not found, using raw websockify"
-        nohup websockify 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+        nohup websockify --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
     fi
-    echo "Web VNC access available at http://localhost:6901/"
+    
+    # Wait a moment for websockify to start
+    sleep 2
+    
+    # Verify websockify is running
+    if pgrep -f "websockify.*6901" > /dev/null; then
+        echo "Web VNC access available at http://localhost:6901/"
+    else
+        echo "Warning: websockify may not have started properly, check /tmp/websockify.log"
+    fi
 else
     echo "Warning: websockify not found, web VNC access will not be available"
 fi
@@ -472,7 +486,7 @@ EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
 EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
 
 # Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
-DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:5901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
+DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:6901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
 PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
 export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
 
@@ -525,6 +539,11 @@ EOF
 export OPEN_BUTTON_PORT
 export OPEN_BUTTON_TOKEN
 
+# Debug: Print PORTAL_CONFIG for verification
+echo "PORTAL_CONFIG configured: ${PORTAL_CONFIG_VALUE}"
+echo "OPEN_BUTTON_PORT: ${OPEN_BUTTON_PORT}"
+echo "OPEN_BUTTON_TOKEN: ${OPEN_BUTTON_TOKEN}"
+
 # Create supervisor scripts if supervisor directory exists
 if [ -d "/opt/supervisor-scripts" ]; then
     # Supervisor script for VNC
@@ -569,10 +588,11 @@ while true; do
     if ! pgrep -f "websockify.*6901" > /dev/null; then
         if command -v websockify &> /dev/null; then
             # Use novnc directory if it exists, otherwise use raw websockify
+            # Bind to 0.0.0.0 to make it accessible from outside the container
             if [ -d /usr/share/novnc ]; then
-                nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+                nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
             else
-                nohup websockify 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+                nohup websockify --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
             fi
         fi
     fi
