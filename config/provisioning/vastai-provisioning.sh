@@ -350,6 +350,8 @@ vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
 
 # Set up websockify for web-based VNC access on port 6901
 echo "Setting up websockify for web VNC access..."
+# Ensure novnc directory exists
+mkdir -p /usr/share/novnc
 # Create index.html redirect to vnc_lite.html for easier access
 cat > /usr/share/novnc/index.html << 'EOF'
 <!DOCTYPE html>
@@ -367,7 +369,8 @@ EOF
 # Start websockify to forward port 6901 to VNC server on port 5901
 if command -v websockify &> /dev/null; then
     echo "Starting websockify on port 6901..."
-    nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+    # Bind to 0.0.0.0 to make it accessible from outside the container
+    nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
     echo "Web VNC access available at http://localhost:6901/"
 else
     echo "Warning: websockify not found, web VNC access will not be available"
@@ -383,7 +386,8 @@ EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
 EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
 
 # Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
-DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:5901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
+# Use port 6901 for web VNC access (websockify) instead of 5901 (raw VNC)
+DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:6901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
 PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
 export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
 
@@ -436,6 +440,12 @@ EOF
 export OPEN_BUTTON_PORT
 export OPEN_BUTTON_TOKEN
 
+# Debug: Print portal configuration for verification
+echo "Portal configuration:"
+echo "  PORTAL_CONFIG: ${PORTAL_CONFIG_VALUE}"
+echo "  OPEN_BUTTON_PORT: ${OPEN_BUTTON_PORT}"
+echo "  OPEN_BUTTON_TOKEN: ${OPEN_BUTTON_TOKEN}"
+
 # Create supervisor scripts if supervisor directory exists
 if [ -d "/opt/supervisor-scripts" ]; then
     # Supervisor script for VNC
@@ -479,7 +489,8 @@ EOF
 while true; do
     if ! pgrep -f "websockify.*6901" > /dev/null; then
         if command -v websockify &> /dev/null; then
-            nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+            # Bind to 0.0.0.0 to make it accessible from outside the container
+            nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
         fi
     fi
     sleep 30
