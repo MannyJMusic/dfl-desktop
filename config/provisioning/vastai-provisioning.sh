@@ -165,13 +165,14 @@ fi
 
 # Fix cron crash loop issue early (Vast.ai base image tries to manage cron but it conflicts with system cron)
 # This must be done early to prevent log spam and potential service conflicts
+# Note: Supervisor may log "ERROR: no such process/group: cron" messages - these are harmless and expected
 echo "Fixing cron crash loop issue..."
 
-# First, try to stop via supervisorctl
+# First, try to stop and remove via supervisorctl (suppress all output to reduce log noise)
 if command -v supervisorctl &> /dev/null; then
-    # Stop and remove cron service from supervisor
-    supervisorctl stop cron 2>/dev/null || true
-    supervisorctl remove cron 2>/dev/null || true
+    # Stop and remove cron service from supervisor (ignore errors as cron may not exist)
+    supervisorctl stop cron >/dev/null 2>&1 || true
+    supervisorctl remove cron >/dev/null 2>&1 || true
 fi
 
 # Disable cron in supervisor config files if they exist
@@ -189,11 +190,12 @@ if command -v supervisorctl &> /dev/null; then
     if [ -f "/etc/supervisor/conf.d/cron.conf" ]; then
         rm -f /etc/supervisor/conf.d/cron.conf || true
     fi
-    supervisorctl reread 2>/dev/null || true
-    supervisorctl update 2>/dev/null || true
-    # Make sure cron is still stopped
-    supervisorctl stop cron 2>/dev/null || true
-    supervisorctl remove cron 2>/dev/null || true
+    # Reload supervisor config (suppress output to reduce noise)
+    supervisorctl reread >/dev/null 2>&1 || true
+    supervisorctl update >/dev/null 2>&1 || true
+    # Make sure cron is still stopped and removed (suppress output)
+    supervisorctl stop cron >/dev/null 2>&1 || true
+    supervisorctl remove cron >/dev/null 2>&1 || true
 fi
 
 # Kill any supervisor-spawned cron processes (but NOT the system cron daemon)
@@ -476,74 +478,6 @@ else
     echo "Warning: websockify not found, web VNC access will not be available"
 fi
 
-# Set up PORTAL_CONFIG for Vast.ai Instance Portal
-# VNC typically runs on port 5901, mapping to external port
-# Instance Portal runs on port 11111 internally, accessible via port 1111 externally
-echo "Configuring Vast.ai Portal..."
-
-# Determine external ports assigned by Vast.ai (fallbacks to standard)
-EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
-EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
-
-# Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
-DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:6901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
-PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
-export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
-
-# Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
-# 1. /etc/environment (for system-wide environment variables)
-#    Use a safe replace that doesn't break on '|' or '/' in values
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^PORTAL_CONFIG=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
-
-# 2. Ensure OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN are set
-OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-$EXTERNAL_PORTAL_PORT}"
-OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
-
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^OPEN_BUTTON_PORT=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'OPEN_BUTTON_PORT=%s\n' "$OPEN_BUTTON_PORT" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
-
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^OPEN_BUTTON_TOKEN=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'OPEN_BUTTON_TOKEN=%s\n' "$OPEN_BUTTON_TOKEN" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
-
-# 3. Create portal.yaml file (Vast.ai base image may read this)
-# Note: Vast.ai primarily uses PORTAL_CONFIG env var, but portal.yaml provides backup
-mkdir -p /etc
-# Write PORTAL_CONFIG in the expected string format
-cat > /etc/portal.yaml << EOF
-# Vast.ai Instance Portal Configuration
-# This file is a backup - PORTAL_CONFIG env var is the primary source
-# Format string: Interface:ExternalPort:InternalPort:Path:Name
-${PORTAL_CONFIG_VALUE}
-EOF
-
-# Export for current session
-export OPEN_BUTTON_PORT
-export OPEN_BUTTON_TOKEN
-
-# Debug: Print PORTAL_CONFIG for verification
-echo "PORTAL_CONFIG configured: ${PORTAL_CONFIG_VALUE}"
-echo "OPEN_BUTTON_PORT: ${OPEN_BUTTON_PORT}"
-echo "OPEN_BUTTON_TOKEN: ${OPEN_BUTTON_TOKEN}"
-
 # Create supervisor scripts if supervisor directory exists
 if [ -d "/opt/supervisor-scripts" ]; then
     # Supervisor script for VNC
@@ -604,9 +538,10 @@ fi
 
 # Ensure cron is properly stopped (duplicate check in case supervisor restarted it)
 # This is a final safeguard after creating supervisor scripts
+# Note: Supervisor may log messages about cron - these are harmless
 if command -v supervisorctl &> /dev/null; then
-    supervisorctl stop cron 2>/dev/null || true
-    supervisorctl remove cron 2>/dev/null || true
+    supervisorctl stop cron >/dev/null 2>&1 || true
+    supervisorctl remove cron >/dev/null 2>&1 || true
     # Don't reload here as it might restart cron - just ensure it's stopped
 fi
 
