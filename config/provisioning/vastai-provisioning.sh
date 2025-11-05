@@ -70,8 +70,12 @@ fi
 
 # Install system dependencies
 echo "Installing system dependencies..."
-apt-get update && \
-    apt-get install -y --no-install-recommends \
+# Update package lists (ignore NVIDIA repo errors - CUDA is already in base image)
+if ! apt-get update; then
+    echo "Warning: Some repositories failed to update (non-critical)"
+fi
+
+apt-get install -y --no-install-recommends \
     git \
     wget \
     unzip \
@@ -300,27 +304,29 @@ echo "Installing TensorFlow ${TENSORFLOW_VERSION}..."
 python -m pip install --no-cache-dir ${TENSORFLOW_INSTALL}
 
 # Install DeepFaceLab Python dependencies
+# Note: Updated versions for TensorFlow 2.16.1 compatibility
 echo "Installing DeepFaceLab dependencies..."
 python -m pip install --no-cache-dir \
     tqdm \
     numpy==1.23.5 \
     numexpr \
-    h5py==3.8.0 \
+    "h5py>=3.10.0" \
     opencv-python==4.8.1.78 \
     ffmpeg-python==0.1.17 \
     scikit-image==0.21.0 \
     scipy==1.11.3 \
     colorama \
     pyqt5 \
-    tf2onnx==1.15.0 \
+    "tf2onnx>=1.16.0" \
     Flask==2.3.3 \
     flask-socketio==5.3.5 \
     tensorboardX \
     crc32c \
     jsonschema \
     Jinja2==3.1.2 \
-    werkzeug==2.3.7 \
-    itsdangerous==2.1.2
+    "werkzeug>=2.3.7" \
+    itsdangerous==2.1.2 \
+    pyyaml
 
 # Clone DFL-MVE repository
 echo "Cloning DFL-MVE repository..."
@@ -424,6 +430,8 @@ vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
 
 # Set up websockify for web-based VNC access on port 6901
 echo "Setting up websockify for web VNC access..."
+# Ensure novnc directory exists
+mkdir -p /usr/share/novnc
 # Create index.html redirect to vnc_lite.html for easier access
 cat > /usr/share/novnc/index.html << 'EOF'
 <!DOCTYPE html>
@@ -441,7 +449,14 @@ EOF
 # Start websockify to forward port 6901 to VNC server on port 5901
 if command -v websockify &> /dev/null; then
     echo "Starting websockify on port 6901..."
-    nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+    # Use novnc directory if it exists, otherwise use websockify without web files
+    if [ -d /usr/share/novnc ]; then
+        nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+    else
+        # Fallback: use websockify without web interface (raw VNC over WebSocket)
+        echo "Warning: novnc web files not found, using raw websockify"
+        nohup websockify 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+    fi
     echo "Web VNC access available at http://localhost:6901/"
 else
     echo "Warning: websockify not found, web VNC access will not be available"
@@ -553,7 +568,12 @@ EOF
 while true; do
     if ! pgrep -f "websockify.*6901" > /dev/null; then
         if command -v websockify &> /dev/null; then
-            nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+            # Use novnc directory if it exists, otherwise use raw websockify
+            if [ -d /usr/share/novnc ]; then
+                nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+            else
+                nohup websockify 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+            fi
         fi
     fi
     sleep 30
