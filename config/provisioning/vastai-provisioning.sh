@@ -15,6 +15,59 @@ cd /workspace/
 
 echo "=== Starting DeepFaceLab Provisioning ==="
 
+# Detect system versions
+echo "Detecting system versions..."
+CUDA_VERSION=""
+CUDNN_VERSION=""
+PYTHON_VERSION="3.10"
+
+# Detect CUDA version
+if command -v nvidia-smi &> /dev/null; then
+    CUDA_VERSION=$(nvidia-smi | grep -oP "CUDA Version: \K[0-9]+\.[0-9]+" | head -1)
+    echo "Detected CUDA Version: ${CUDA_VERSION}"
+else
+    echo "Warning: nvidia-smi not found, cannot detect CUDA version"
+fi
+
+# Detect cuDNN version
+if [ -f /usr/include/cudnn_version.h ]; then
+    CUDNN_MAJOR=$(grep CUDNN_MAJOR /usr/include/cudnn_version.h | awk '{print $3}')
+    CUDNN_MINOR=$(grep CUDNN_MINOR /usr/include/cudnn_version.h | awk '{print $3}')
+    CUDNN_VERSION="${CUDNN_MAJOR}.${CUDNN_MINOR}"
+    echo "Detected cuDNN Version: ${CUDNN_VERSION}"
+elif ldconfig -p | grep -q libcudnn; then
+    # Try to detect from library files
+    CUDNN_LIB=$(ldconfig -p | grep libcudnn.so | head -1 | awk '{print $NF}')
+    if [ -n "$CUDNN_LIB" ]; then
+        CUDNN_VERSION=$(echo "$CUDNN_LIB" | grep -oP "libcudnn\.so\.\K[0-9]+" | head -1)
+        echo "Detected cuDNN Version: ${CUDNN_VERSION} (from library)"
+    fi
+else
+    echo "Warning: cuDNN not detected in system"
+fi
+
+# Determine TensorFlow version based on CUDA version
+if [ -n "$CUDA_VERSION" ]; then
+    CUDA_MAJOR=$(echo $CUDA_VERSION | cut -d. -f1)
+    if [ "$CUDA_MAJOR" -ge 12 ]; then
+        TENSORFLOW_VERSION="2.16.1"
+        TENSORFLOW_INSTALL="tensorflow[and-cuda]==2.16.1"
+        echo "CUDA 12.x detected - will install TensorFlow $TENSORFLOW_VERSION with bundled CUDA libraries"
+    elif [ "$CUDA_MAJOR" -eq 11 ]; then
+        TENSORFLOW_VERSION="2.13.0"
+        TENSORFLOW_INSTALL="tensorflow==$TENSORFLOW_VERSION"
+        echo "CUDA 11.x detected - will install TensorFlow $TENSORFLOW_VERSION"
+    else
+        TENSORFLOW_VERSION="2.16.1"
+        TENSORFLOW_INSTALL="tensorflow[and-cuda]==2.16.1"
+        echo "CUDA version unclear - defaulting to TensorFlow $TENSORFLOW_VERSION with bundled CUDA"
+    fi
+else
+    TENSORFLOW_VERSION="2.16.1"
+    TENSORFLOW_INSTALL="tensorflow[and-cuda]==2.16.1"
+    echo "CUDA not detected - will install TensorFlow with bundled CUDA libraries"
+fi
+
 # Install system dependencies
 echo "Installing system dependencies..."
 apt-get update && \
@@ -32,14 +85,16 @@ apt-get update && \
     libxrender-dev \
     libgomp1 \
     kde-plasma-desktop \
-    kde-standard \
-    kde-config-screenlocker \
     tigervnc-standalone-server \
     tigervnc-tools \
     tigervnc-xorg-extension \
     tigervnc-common \
     dbus-x11 \
     x11-xserver-utils \
+    xfce4 \
+    xfce4-goodies \
+    xfce4-notifyd \
+    kde-config-screenlocker \
     websockify \
     novnc \
     network-manager \
@@ -216,12 +271,33 @@ fi
 # Activate conda environment
 conda activate ${CONDA_ENV_PATH}
 
+# Create conda activation script to set OpenBLAS thread limits and CUDA library paths
+mkdir -p ${CONDA_ENV_PATH}/etc/conda/activate.d
+cat > ${CONDA_ENV_PATH}/etc/conda/activate.d/env_vars.sh << 'EOF'
+#!/bin/bash
+# Limit OpenBLAS threads to prevent resource exhaustion
+export OPENBLAS_NUM_THREADS=4
+export GOTO_NUM_THREADS=4
+export OMP_NUM_THREADS=4
+
+# Add NVIDIA CUDA libraries to LD_LIBRARY_PATH for TensorFlow GPU support
+# Use hardcoded path since ${CONDA_PREFIX} may not be set during activation
+NVIDIA_LIBS="/opt/conda-envs/deepfacelab/lib/python3.10/site-packages/nvidia"
+if [ -d "$NVIDIA_LIBS" ]; then
+    NVIDIA_LIB_DIRS=$(find "$NVIDIA_LIBS" -name 'lib' -type d 2>/dev/null | tr '\n' ':')
+    if [ -n "$NVIDIA_LIB_DIRS" ]; then
+        export LD_LIBRARY_PATH="${NVIDIA_LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+fi
+EOF
+chmod +x ${CONDA_ENV_PATH}/etc/conda/activate.d/env_vars.sh
+
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install TensorFlow 2.13 with GPU support
-echo "Installing TensorFlow 2.13..."
-python -m pip install --no-cache-dir tensorflow==2.13.0
+# Install TensorFlow with GPU support (version determined by CUDA detection)
+echo "Installing TensorFlow ${TENSORFLOW_VERSION}..."
+python -m pip install --no-cache-dir ${TENSORFLOW_INSTALL}
 
 # Install DeepFaceLab Python dependencies
 echo "Installing DeepFaceLab dependencies..."
@@ -311,7 +387,7 @@ echo "${VNC_PASSWORD}" | ${VNCPASSWD_CMD} -f > ${VNC_HOME}/.vnc/passwd
 chmod 600 ${VNC_HOME}/.vnc/passwd
 echo "VNC password configured (from VNC_PASSWORD env var or default)"
 
-# Create xstartup script for KDE Plasma Desktop Environment
+# Create xstartup script for XFCE4 Desktop Environment
 cat > ${VNC_HOME}/.vnc/xstartup << 'EOF'
 #!/bin/bash
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
@@ -320,30 +396,18 @@ export XKL_XMODMAP_DISABLE=1
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 
-# Start D-Bus session (required for KDE Plasma)
+# Start D-Bus session
 if [ -x /usr/bin/dbus-launch ]; then
     eval $(dbus-launch --sh-syntax)
     export DBUS_SESSION_BUS_ADDRESS
     export DBUS_SESSION_BUS_PID
 fi
 
-# Set KDE environment variables for VNC
-export XDG_SESSION_TYPE=x11
-export XDG_CURRENT_DESKTOP=KDE
-export KDE_SESSION_VERSION=5
-
-# Configure KDE for VNC (disable features that don't work well in VNC)
-export QT_QPA_PLATFORM=xcb
-export QT_X11_NO_MITSHM=1
-
-# Start KDE Plasma Desktop Environment
-if [ -x /usr/bin/startplasma-x11 ]; then
-    /usr/bin/startplasma-x11 &
-elif [ -x /usr/bin/startkde ]; then
-    /usr/bin/startkde &
+# Start XFCE4 Desktop Environment
+if [ -x /usr/bin/startxfce4 ]; then
+    /usr/bin/startxfce4 &
 else
     # Fallback to simple window manager
-    echo "Warning: KDE Plasma not found, using fallback window manager"
     [ -x /usr/bin/twm ] && /usr/bin/twm &
     [ -x /usr/bin/xterm ] && /usr/bin/xterm -geometry 80x24+10+10 -ls &
 fi
@@ -353,31 +417,6 @@ wait
 EOF
 
 chmod +x ${VNC_HOME}/.vnc/xstartup
-
-# Configure KDE Plasma for VNC environment
-echo "Configuring KDE Plasma for VNC..."
-mkdir -p ${VNC_HOME}/.config
-
-# Create KDE configuration to optimize for VNC
-cat > ${VNC_HOME}/.config/kdeglobals << 'EOF'
-[KDE]
-SingleClick=false
-EOF
-
-# Disable screen locking in VNC (can cause issues)
-cat > ${VNC_HOME}/.config/kscreenlockerrc << 'EOF'
-[Daemon]
-Autolock=false
-LockOnResume=false
-EOF
-
-# Set KDE to use X11 session (required for VNC)
-mkdir -p ${VNC_HOME}/.config/plasma-workspace/env
-cat > ${VNC_HOME}/.config/plasma-workspace/env/set_window_manager.sh << 'EOF'
-#!/bin/bash
-export KDEWM=kwin
-EOF
-chmod +x ${VNC_HOME}/.config/plasma-workspace/env/set_window_manager.sh 2>/dev/null || true
 
 # Start VNC server in background
 echo "Starting VNC server..."
@@ -532,27 +571,60 @@ if command -v supervisorctl &> /dev/null; then
 fi
 
 # Create environment setup script
-cat > /opt/setup-dfl-env.sh << EOF
+cat > /opt/setup-dfl-env.sh << 'EOFSETUP'
 #!/bin/bash
 # Activate DeepFaceLab conda environment
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate ${CONDA_ENV_PATH}
+source "$(conda info --base 2>/dev/null || echo /opt/miniconda3)/etc/profile.d/conda.sh"
+conda activate /opt/conda-envs/deepfacelab
+
+# Limit OpenBLAS threads to prevent resource exhaustion
+export OPENBLAS_NUM_THREADS=4
+export GOTO_NUM_THREADS=4
+export OMP_NUM_THREADS=4
+
+# Add NVIDIA CUDA libraries to LD_LIBRARY_PATH for TensorFlow GPU support
+NVIDIA_LIBS="/opt/conda-envs/deepfacelab/lib/python3.10/site-packages/nvidia"
+if [ -d "$NVIDIA_LIBS" ]; then
+    NVIDIA_LIB_DIRS=$(find "$NVIDIA_LIBS" -name 'lib' -type d 2>/dev/null | tr '\n' ':')
+    if [ -n "$NVIDIA_LIB_DIRS" ]; then
+        export LD_LIBRARY_PATH="${NVIDIA_LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+fi
+
 export DFL_PYTHON="python"
-export DFL_WORKSPACE="${DEEPFACELAB_PATH}/workspace/"
-export DFL_ROOT="${DEEPFACELAB_PATH}/"
-export DFL_SRC="${DEEPFACELAB_PATH}/DeepFaceLab"
-cd ${DEEPFACELAB_PATH}
-EOF
+export DFL_WORKSPACE="/opt/DFL-MVE/DeepFaceLab/workspace/"
+export DFL_ROOT="/opt/DFL-MVE/DeepFaceLab/"
+export DFL_SRC="/opt/DFL-MVE/DeepFaceLab/DeepFaceLab"
+cd /opt/DFL-MVE/DeepFaceLab 2>/dev/null || cd /opt/DeepFaceLab 2>/dev/null || true
+EOFSETUP
 chmod +x /opt/setup-dfl-env.sh
+
+# Set OpenBLAS thread limits system-wide
+echo "export OPENBLAS_NUM_THREADS=4" >> /etc/environment
+echo "export GOTO_NUM_THREADS=4" >> /etc/environment
+echo "export OMP_NUM_THREADS=4" >> /etc/environment
 
 # Create symlink for convenience (in /opt, not /root)
 ln -sf ${DEEPFACELAB_PATH}/workspace /opt/workspace 2>/dev/null || true
 ln -sf ${DEEPFACELAB_PATH} /opt/DeepFaceLab 2>/dev/null || true
 
 echo "=== Provisioning Complete ==="
-echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
-echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
-echo "Conda environment: ${CONDA_ENV_PATH}"
-echo "To activate: source /opt/setup-dfl-env.sh"
-echo "VNC server should be running on :1"
+echo ""
+echo "System Configuration:"
+echo "  CUDA Version: ${CUDA_VERSION:-Not detected}"
+echo "  cuDNN Version: ${CUDNN_VERSION:-Not detected}"
+echo "  TensorFlow Version: ${TENSORFLOW_VERSION}"
+echo "  Python Version: ${PYTHON_VERSION}"
+echo ""
+echo "Installation Paths:"
+echo "  DeepFaceLab: ${DEEPFACELAB_PATH}"
+echo "  Workspace: ${DEEPFACELAB_PATH}/workspace"
+echo "  Conda environment: ${CONDA_ENV_PATH}"
+echo ""
+echo "Services:"
+echo "  VNC Server: Port 5901 (Display :1)"
+echo "  Web VNC: http://localhost:6901/"
+echo "  VNC Password: ${VNC_PASSWORD}"
+echo ""
+echo "To activate environment: source /opt/setup-dfl-env.sh"
 
