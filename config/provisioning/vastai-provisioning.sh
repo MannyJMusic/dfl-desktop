@@ -65,10 +65,16 @@ rm Miniconda3-latest-Linux-x86_64.sh
 # Source conda.sh to use conda in this script
 source /opt/miniconda3/etc/profile.d/conda.sh
 
+# Configure conda to use conda-forge (no ToS required) instead of default Anaconda channels
+echo "Configuring conda to use conda-forge..."
+conda config --set channel_priority strict
+conda config --add channels conda-forge
+conda config --remove channels defaults || true
+
 # Create conda environment (use path-based for consistency)
 echo "Creating conda environment..."
 mkdir -p /opt/conda-envs
-conda create -y -p /opt/conda-envs/${CONDA_ENV_NAME} python=3.10
+conda create -y -p /opt/conda-envs/${CONDA_ENV_NAME} python=3.10 -c conda-forge
 conda activate /opt/conda-envs/${CONDA_ENV_NAME}
 
 # Upgrade pip
