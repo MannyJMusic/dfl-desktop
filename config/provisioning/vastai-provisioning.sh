@@ -15,67 +15,10 @@ cd /workspace/
 
 echo "=== Starting DeepFaceLab Provisioning ==="
 
-# Detect system versions
-echo "Detecting system versions..."
-CUDA_VERSION=""
-CUDNN_VERSION=""
-PYTHON_VERSION="3.10"
-
-# Detect CUDA version
-if command -v nvidia-smi &> /dev/null; then
-    CUDA_VERSION=$(nvidia-smi | grep -oP "CUDA Version: \K[0-9]+\.[0-9]+" | head -1)
-    echo "Detected CUDA Version: ${CUDA_VERSION}"
-else
-    echo "Warning: nvidia-smi not found, cannot detect CUDA version"
-fi
-
-# Detect cuDNN version
-if [ -f /usr/include/cudnn_version.h ]; then
-    CUDNN_MAJOR=$(grep CUDNN_MAJOR /usr/include/cudnn_version.h | awk '{print $3}')
-    CUDNN_MINOR=$(grep CUDNN_MINOR /usr/include/cudnn_version.h | awk '{print $3}')
-    CUDNN_VERSION="${CUDNN_MAJOR}.${CUDNN_MINOR}"
-    echo "Detected cuDNN Version: ${CUDNN_VERSION}"
-elif ldconfig -p | grep -q libcudnn; then
-    # Try to detect from library files
-    CUDNN_LIB=$(ldconfig -p | grep libcudnn.so | head -1 | awk '{print $NF}')
-    if [ -n "$CUDNN_LIB" ]; then
-        CUDNN_VERSION=$(echo "$CUDNN_LIB" | grep -oP "libcudnn\.so\.\K[0-9]+" | head -1)
-        echo "Detected cuDNN Version: ${CUDNN_VERSION} (from library)"
-    fi
-else
-    echo "Warning: cuDNN not detected in system"
-fi
-
-# Determine TensorFlow version based on CUDA version
-if [ -n "$CUDA_VERSION" ]; then
-    CUDA_MAJOR=$(echo $CUDA_VERSION | cut -d. -f1)
-    if [ "$CUDA_MAJOR" -ge 12 ]; then
-        TENSORFLOW_VERSION="2.16.1"
-        TENSORFLOW_INSTALL="tensorflow[and-cuda]==2.16.1"
-        echo "CUDA 12.x detected - will install TensorFlow $TENSORFLOW_VERSION with bundled CUDA libraries"
-    elif [ "$CUDA_MAJOR" -eq 11 ]; then
-        TENSORFLOW_VERSION="2.13.0"
-        TENSORFLOW_INSTALL="tensorflow==$TENSORFLOW_VERSION"
-        echo "CUDA 11.x detected - will install TensorFlow $TENSORFLOW_VERSION"
-    else
-        TENSORFLOW_VERSION="2.16.1"
-        TENSORFLOW_INSTALL="tensorflow[and-cuda]==2.16.1"
-        echo "CUDA version unclear - defaulting to TensorFlow $TENSORFLOW_VERSION with bundled CUDA"
-    fi
-else
-    TENSORFLOW_VERSION="2.16.1"
-    TENSORFLOW_INSTALL="tensorflow[and-cuda]==2.16.1"
-    echo "CUDA not detected - will install TensorFlow with bundled CUDA libraries"
-fi
-
 # Install system dependencies
 echo "Installing system dependencies..."
-# Update package lists (ignore NVIDIA repo errors - CUDA is already in base image)
-if ! apt-get update; then
-    echo "Warning: Some repositories failed to update (non-critical)"
-fi
-
-apt-get install -y --no-install-recommends \
+apt-get update && \
+    apt-get install -y --no-install-recommends \
     git \
     wget \
     unzip \
@@ -165,14 +108,13 @@ fi
 
 # Fix cron crash loop issue early (Vast.ai base image tries to manage cron but it conflicts with system cron)
 # This must be done early to prevent log spam and potential service conflicts
-# Note: Supervisor may log "ERROR: no such process/group: cron" messages - these are harmless and expected
 echo "Fixing cron crash loop issue..."
 
-# First, try to stop and remove via supervisorctl (suppress all output to reduce log noise)
+# First, try to stop via supervisorctl
 if command -v supervisorctl &> /dev/null; then
-    # Stop and remove cron service from supervisor (ignore errors as cron may not exist)
-    supervisorctl stop cron >/dev/null 2>&1 || true
-    supervisorctl remove cron >/dev/null 2>&1 || true
+    # Stop and remove cron service from supervisor
+    supervisorctl stop cron 2>/dev/null || true
+    supervisorctl remove cron 2>/dev/null || true
 fi
 
 # Disable cron in supervisor config files if they exist
@@ -190,12 +132,11 @@ if command -v supervisorctl &> /dev/null; then
     if [ -f "/etc/supervisor/conf.d/cron.conf" ]; then
         rm -f /etc/supervisor/conf.d/cron.conf || true
     fi
-    # Reload supervisor config (suppress output to reduce noise)
-    supervisorctl reread >/dev/null 2>&1 || true
-    supervisorctl update >/dev/null 2>&1 || true
-    # Make sure cron is still stopped and removed (suppress output)
-    supervisorctl stop cron >/dev/null 2>&1 || true
-    supervisorctl remove cron >/dev/null 2>&1 || true
+    supervisorctl reread 2>/dev/null || true
+    supervisorctl update 2>/dev/null || true
+    # Make sure cron is still stopped
+    supervisorctl stop cron 2>/dev/null || true
+    supervisorctl remove cron 2>/dev/null || true
 fi
 
 # Kill any supervisor-spawned cron processes (but NOT the system cron daemon)
@@ -277,58 +218,35 @@ fi
 # Activate conda environment
 conda activate ${CONDA_ENV_PATH}
 
-# Create conda activation script to set OpenBLAS thread limits and CUDA library paths
-mkdir -p ${CONDA_ENV_PATH}/etc/conda/activate.d
-cat > ${CONDA_ENV_PATH}/etc/conda/activate.d/env_vars.sh << 'EOF'
-#!/bin/bash
-# Limit OpenBLAS threads to prevent resource exhaustion
-export OPENBLAS_NUM_THREADS=4
-export GOTO_NUM_THREADS=4
-export OMP_NUM_THREADS=4
-
-# Add NVIDIA CUDA libraries to LD_LIBRARY_PATH for TensorFlow GPU support
-# Use hardcoded path since ${CONDA_PREFIX} may not be set during activation
-NVIDIA_LIBS="/opt/conda-envs/deepfacelab/lib/python3.10/site-packages/nvidia"
-if [ -d "$NVIDIA_LIBS" ]; then
-    NVIDIA_LIB_DIRS=$(find "$NVIDIA_LIBS" -name 'lib' -type d 2>/dev/null | tr '\n' ':')
-    if [ -n "$NVIDIA_LIB_DIRS" ]; then
-        export LD_LIBRARY_PATH="${NVIDIA_LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    fi
-fi
-EOF
-chmod +x ${CONDA_ENV_PATH}/etc/conda/activate.d/env_vars.sh
-
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install TensorFlow with GPU support (version determined by CUDA detection)
-echo "Installing TensorFlow ${TENSORFLOW_VERSION}..."
-python -m pip install --no-cache-dir ${TENSORFLOW_INSTALL}
+# Install TensorFlow 2.13 with GPU support
+echo "Installing TensorFlow 2.13..."
+python -m pip install --no-cache-dir tensorflow==2.13.0
 
 # Install DeepFaceLab Python dependencies
-# Note: Updated versions for TensorFlow 2.16.1 compatibility
 echo "Installing DeepFaceLab dependencies..."
 python -m pip install --no-cache-dir \
     tqdm \
     numpy==1.23.5 \
     numexpr \
-    "h5py>=3.10.0" \
+    h5py==3.8.0 \
     opencv-python==4.8.1.78 \
     ffmpeg-python==0.1.17 \
     scikit-image==0.21.0 \
     scipy==1.11.3 \
     colorama \
     pyqt5 \
-    "tf2onnx>=1.16.0" \
+    tf2onnx==1.15.0 \
     Flask==2.3.3 \
     flask-socketio==5.3.5 \
     tensorboardX \
     crc32c \
     jsonschema \
     Jinja2==3.1.2 \
-    "werkzeug>=2.3.7" \
-    itsdangerous==2.1.2 \
-    pyyaml
+    werkzeug==2.3.7 \
+    itsdangerous==2.1.2
 
 # Clone DFL-MVE repository
 echo "Cloning DFL-MVE repository..."
@@ -432,8 +350,6 @@ vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
 
 # Set up websockify for web-based VNC access on port 6901
 echo "Setting up websockify for web VNC access..."
-# Ensure novnc directory exists
-mkdir -p /usr/share/novnc
 # Create index.html redirect to vnc_lite.html for easier access
 cat > /usr/share/novnc/index.html << 'EOF'
 <!DOCTYPE html>
@@ -451,32 +367,74 @@ EOF
 # Start websockify to forward port 6901 to VNC server on port 5901
 if command -v websockify &> /dev/null; then
     echo "Starting websockify on port 6901..."
-    # Kill any existing websockify processes on port 6901
-    pkill -f "websockify.*6901" 2>/dev/null || true
-    sleep 1
-    
-    # Use novnc directory if it exists, otherwise use websockify without web files
-    # Bind to 0.0.0.0 to make it accessible from outside the container
-    if [ -d /usr/share/novnc ]; then
-        nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
-    else
-        # Fallback: use websockify without web interface (raw VNC over WebSocket)
-        echo "Warning: novnc web files not found, using raw websockify"
-        nohup websockify --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
-    fi
-    
-    # Wait a moment for websockify to start
-    sleep 2
-    
-    # Verify websockify is running
-    if pgrep -f "websockify.*6901" > /dev/null; then
-        echo "Web VNC access available at http://localhost:6901/"
-    else
-        echo "Warning: websockify may not have started properly, check /tmp/websockify.log"
-    fi
+    nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+    echo "Web VNC access available at http://localhost:6901/"
 else
     echo "Warning: websockify not found, web VNC access will not be available"
 fi
+
+# Set up PORTAL_CONFIG for Vast.ai Instance Portal
+# VNC typically runs on port 5901, mapping to external port
+# Instance Portal runs on port 11111 internally, accessible via port 1111 externally
+echo "Configuring Vast.ai Portal..."
+
+# Determine external ports assigned by Vast.ai (fallbacks to standard)
+EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
+EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
+
+# Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
+DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:5901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
+PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
+export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
+
+# Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
+# 1. /etc/environment (for system-wide environment variables)
+#    Use a safe replace that doesn't break on '|' or '/' in values
+TMP_ENV_FILE=$(mktemp)
+if [ -f /etc/environment ]; then
+    grep -v '^PORTAL_CONFIG=' /etc/environment > "$TMP_ENV_FILE" || true
+else
+    : > "$TMP_ENV_FILE"
+fi
+printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
+mv "$TMP_ENV_FILE" /etc/environment
+
+# 2. Ensure OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN are set
+OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-$EXTERNAL_PORTAL_PORT}"
+OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
+
+TMP_ENV_FILE=$(mktemp)
+if [ -f /etc/environment ]; then
+    grep -v '^OPEN_BUTTON_PORT=' /etc/environment > "$TMP_ENV_FILE" || true
+else
+    : > "$TMP_ENV_FILE"
+fi
+printf 'OPEN_BUTTON_PORT=%s\n' "$OPEN_BUTTON_PORT" >> "$TMP_ENV_FILE"
+mv "$TMP_ENV_FILE" /etc/environment
+
+TMP_ENV_FILE=$(mktemp)
+if [ -f /etc/environment ]; then
+    grep -v '^OPEN_BUTTON_TOKEN=' /etc/environment > "$TMP_ENV_FILE" || true
+else
+    : > "$TMP_ENV_FILE"
+fi
+printf 'OPEN_BUTTON_TOKEN=%s\n' "$OPEN_BUTTON_TOKEN" >> "$TMP_ENV_FILE"
+mv "$TMP_ENV_FILE" /etc/environment
+
+# 3. Create portal.yaml file (Vast.ai base image may read this)
+# Note: Vast.ai primarily uses PORTAL_CONFIG env var, but portal.yaml provides backup
+mkdir -p /etc
+# Write PORTAL_CONFIG in the expected string format
+cat > /etc/portal.yaml << EOF
+# Vast.ai Instance Portal Configuration
+# This file is a backup - PORTAL_CONFIG env var is the primary source
+# Format string: Interface:ExternalPort:InternalPort:Path:Name
+${PORTAL_CONFIG_VALUE}
+EOF
+
+# Export for current session
+export OPEN_BUTTON_PORT
+export OPEN_BUTTON_TOKEN
 
 # Create supervisor scripts if supervisor directory exists
 if [ -d "/opt/supervisor-scripts" ]; then
@@ -521,13 +479,7 @@ EOF
 while true; do
     if ! pgrep -f "websockify.*6901" > /dev/null; then
         if command -v websockify &> /dev/null; then
-            # Use novnc directory if it exists, otherwise use raw websockify
-            # Bind to 0.0.0.0 to make it accessible from outside the container
-            if [ -d /usr/share/novnc ]; then
-                nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
-            else
-                nohup websockify --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
-            fi
+            nohup websockify --web /usr/share/novnc/ 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
         fi
     fi
     sleep 30
@@ -538,68 +490,33 @@ fi
 
 # Ensure cron is properly stopped (duplicate check in case supervisor restarted it)
 # This is a final safeguard after creating supervisor scripts
-# Note: Supervisor may log messages about cron - these are harmless
 if command -v supervisorctl &> /dev/null; then
-    supervisorctl stop cron >/dev/null 2>&1 || true
-    supervisorctl remove cron >/dev/null 2>&1 || true
+    supervisorctl stop cron 2>/dev/null || true
+    supervisorctl remove cron 2>/dev/null || true
     # Don't reload here as it might restart cron - just ensure it's stopped
 fi
 
 # Create environment setup script
-cat > /opt/setup-dfl-env.sh << 'EOFSETUP'
+cat > /opt/setup-dfl-env.sh << EOF
 #!/bin/bash
 # Activate DeepFaceLab conda environment
-source "$(conda info --base 2>/dev/null || echo /opt/miniconda3)/etc/profile.d/conda.sh"
-conda activate /opt/conda-envs/deepfacelab
-
-# Limit OpenBLAS threads to prevent resource exhaustion
-export OPENBLAS_NUM_THREADS=4
-export GOTO_NUM_THREADS=4
-export OMP_NUM_THREADS=4
-
-# Add NVIDIA CUDA libraries to LD_LIBRARY_PATH for TensorFlow GPU support
-NVIDIA_LIBS="/opt/conda-envs/deepfacelab/lib/python3.10/site-packages/nvidia"
-if [ -d "$NVIDIA_LIBS" ]; then
-    NVIDIA_LIB_DIRS=$(find "$NVIDIA_LIBS" -name 'lib' -type d 2>/dev/null | tr '\n' ':')
-    if [ -n "$NVIDIA_LIB_DIRS" ]; then
-        export LD_LIBRARY_PATH="${NVIDIA_LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    fi
-fi
-
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate ${CONDA_ENV_PATH}
 export DFL_PYTHON="python"
-export DFL_WORKSPACE="/opt/DFL-MVE/DeepFaceLab/workspace/"
-export DFL_ROOT="/opt/DFL-MVE/DeepFaceLab/"
-export DFL_SRC="/opt/DFL-MVE/DeepFaceLab/DeepFaceLab"
-cd /opt/DFL-MVE/DeepFaceLab 2>/dev/null || cd /opt/DeepFaceLab 2>/dev/null || true
-EOFSETUP
+export DFL_WORKSPACE="${DEEPFACELAB_PATH}/workspace/"
+export DFL_ROOT="${DEEPFACELAB_PATH}/"
+export DFL_SRC="${DEEPFACELAB_PATH}/DeepFaceLab"
+cd ${DEEPFACELAB_PATH}
+EOF
 chmod +x /opt/setup-dfl-env.sh
-
-# Set OpenBLAS thread limits system-wide
-echo "export OPENBLAS_NUM_THREADS=4" >> /etc/environment
-echo "export GOTO_NUM_THREADS=4" >> /etc/environment
-echo "export OMP_NUM_THREADS=4" >> /etc/environment
 
 # Create symlink for convenience (in /opt, not /root)
 ln -sf ${DEEPFACELAB_PATH}/workspace /opt/workspace 2>/dev/null || true
 ln -sf ${DEEPFACELAB_PATH} /opt/DeepFaceLab 2>/dev/null || true
 
 echo "=== Provisioning Complete ==="
-echo ""
-echo "System Configuration:"
-echo "  CUDA Version: ${CUDA_VERSION:-Not detected}"
-echo "  cuDNN Version: ${CUDNN_VERSION:-Not detected}"
-echo "  TensorFlow Version: ${TENSORFLOW_VERSION}"
-echo "  Python Version: ${PYTHON_VERSION}"
-echo ""
-echo "Installation Paths:"
-echo "  DeepFaceLab: ${DEEPFACELAB_PATH}"
-echo "  Workspace: ${DEEPFACELAB_PATH}/workspace"
-echo "  Conda environment: ${CONDA_ENV_PATH}"
-echo ""
-echo "Services:"
-echo "  VNC Server: Port 5901 (Display :1)"
-echo "  Web VNC: http://localhost:6901/"
-echo "  VNC Password: ${VNC_PASSWORD}"
-echo ""
-echo "To activate environment: source /opt/setup-dfl-env.sh"
-
+echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
+echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
+echo "Conda environment: ${CONDA_ENV_PATH}"
+echo "To activate: source /opt/setup-dfl-env.sh"
+echo "VNC server should be running on :1"
