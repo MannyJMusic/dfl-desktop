@@ -329,6 +329,23 @@ else
     mkdir -p ${DEEPFACELAB_PATH}/scripts
 fi
 
+# Copy scripts to /opt/scripts for user convenience (where users land on SSH)
+echo "Setting up /opt/scripts directory..."
+mkdir -p /opt/scripts
+# Copy from DFL-MVE repository if it exists
+if [ -d "${DEEPFACELAB_PATH}/scripts" ] && [ "$(ls -A ${DEEPFACELAB_PATH}/scripts 2>/dev/null)" ]; then
+    cp -r ${DEEPFACELAB_PATH}/scripts/* /opt/scripts/ 2>/dev/null || true
+    chmod +x /opt/scripts/*.sh 2>/dev/null || true
+    echo "Copied scripts from DFL-MVE repository to /opt/scripts"
+# Or copy from workspace if available
+elif [ -d "/workspace/scripts" ] && [ "$(ls -A /workspace/scripts 2>/dev/null)" ]; then
+    cp -r /workspace/scripts/* /opt/scripts/ 2>/dev/null || true
+    chmod +x /opt/scripts/*.sh 2>/dev/null || true
+    echo "Copied scripts from /workspace/scripts to /opt/scripts"
+else
+    echo "Warning: No scripts found to copy to /opt/scripts"
+fi
+
 # Set up Machine Video Editor
 echo "Setting up Machine Video Editor..."
 mkdir -p ${MVE_PATH}
