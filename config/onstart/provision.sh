@@ -93,10 +93,11 @@ if ! command -v conda >/dev/null 2>&1; then
 fi
 
 # 4) Create env only once
-CONDA_ENV_PATH="/opt/conda-envs/deepfacelab"
-if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
-  log "Creating conda environment at ${CONDA_ENV_PATH}..."
-  mkdir -p /opt/conda-envs
+CONDA_ENV_NAME="deepfacelab"
+if conda env list | grep -q "^${CONDA_ENV_NAME}\s"; then
+  log "conda env '${CONDA_ENV_NAME}' already exists"
+else
+  log "Creating conda environment '${CONDA_ENV_NAME}'..."
   # Ensure conda-forge is configured (in case conda was already installed)
   conda config --set channel_priority strict 2>/dev/null || true
   # Remove Anaconda channels that require ToS acceptance
@@ -106,27 +107,25 @@ if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
   conda config --add channels conda-forge 2>/dev/null || true
   
   # Try creating with cudatoolkit first, fallback to basic Python
-  if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c conda-forge --override-channels 2>&1; then
+  if ! conda create -y -n ${CONDA_ENV_NAME} python=3.10 cudatoolkit=11.8 -c conda-forge --override-channels 2>&1; then
     log "cudatoolkit=11.8 not available, creating environment without it..."
-    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge --override-channels 2>&1; then
+    if ! conda create -y -n ${CONDA_ENV_NAME} python=3.10 -c conda-forge --override-channels 2>&1; then
       log "Error: Failed to create conda environment"
       exit 1
     fi
   fi
   
   # Verify environment was created
-  if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
-    log "Error: Conda environment was not created successfully"
+  if ! conda env list | grep -q "^${CONDA_ENV_NAME}\s"; then
+    log "Error: Conda environment '${CONDA_ENV_NAME}' was not created successfully"
     exit 1
   fi
-  log "conda env created successfully"
-else
-  log "conda env already exists at ${CONDA_ENV_PATH}"
+  log "conda env '${CONDA_ENV_NAME}' created successfully"
 fi
 
 # Activate the environment
 log "Activating conda environment..."
-conda activate ${CONDA_ENV_PATH} || {
+conda activate ${CONDA_ENV_NAME} || {
   log "Warning: Failed to activate conda environment, but continuing..."
 }
 
@@ -189,7 +188,7 @@ pgrep -f "vncserver :1" >/dev/null 2>&1 || vncserver :1 -geometry 1920x1080 -dep
 [ -f /opt/setup-dfl-env.sh ] || cat >/opt/setup-dfl-env.sh <<'EOS'
 #!/usr/bin/env bash
 source /opt/miniconda3/etc/profile.d/conda.sh
-conda activate /opt/conda-envs/deepfacelab
+conda activate deepfacelab
 export DFL_PYTHON=python
 export DFL_WORKSPACE=/opt/workspace/
 export DFL_ROOT=/opt/DeepFaceLab/
@@ -205,8 +204,8 @@ if ! grep -q "DFL auto-setup" /root/.bashrc 2>/dev/null; then
 # DFL auto-setup: Initialize conda and activate deepfacelab environment on SSH login
 if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
     source /opt/miniconda3/etc/profile.d/conda.sh
-    # Try to activate conda environment (either path-based or name-based)
-    conda activate /opt/conda-envs/deepfacelab 2>/dev/null || conda activate deepfacelab 2>/dev/null || true
+    # Activate conda environment by name
+    conda activate deepfacelab 2>/dev/null || true
 fi
 # Change to scripts directory on SSH login
 if [ -d /opt/scripts ]; then

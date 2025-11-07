@@ -8,7 +8,6 @@ export DFL_MVE_PATH=/opt/DFL-MVE
 export DEEPFACELAB_PATH=/opt/DFL-MVE/DeepFaceLab
 export MVE_PATH=/opt/MachineVideoEditor
 export CONDA_ENV_NAME=deepfacelab
-export CONDA_ENV_PATH=/opt/conda-envs/${CONDA_ENV_NAME}
 
 # Change to workspace for persistence
 cd /workspace/
@@ -209,23 +208,22 @@ fi
 # Note: Base image already has CUDA 12.6.3 and cuDNN installed system-wide,
 # so we don't need to install them via conda. TensorFlow will use system CUDA libraries.
 echo "Creating conda environment: ${CONDA_ENV_NAME}..."
-mkdir -p /opt/conda-envs
 
-# Check if environment already exists
-if [ -d "${CONDA_ENV_PATH}" ] && [ -f "${CONDA_ENV_PATH}/bin/python" ]; then
-    echo "Conda environment already exists at ${CONDA_ENV_PATH}, skipping creation"
+# Check if named environment already exists
+if conda env list | grep -q "^${CONDA_ENV_NAME}\s"; then
+    echo "Conda environment '${CONDA_ENV_NAME}' already exists, skipping creation"
 else
     echo "Environment does not exist, creating new conda environment..."
     
-    # Try to create environment with cudatoolkit for TensorFlow compatibility
+    # Try to create named environment with cudatoolkit for TensorFlow compatibility
     # If that fails, create basic Python environment (TensorFlow will use system CUDA)
-    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>&1; then
+    if ! conda create -y -n ${CONDA_ENV_NAME} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>&1; then
         echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
         echo "TensorFlow will use system CUDA libraries from the base image."
-        if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge 2>&1; then
+        if ! conda create -y -n ${CONDA_ENV_NAME} python=3.10 -c conda-forge 2>&1; then
             echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
             if [ -f "/workspace/environment.yml" ]; then
-                conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml 2>&1 || {
+                conda env create -n ${CONDA_ENV_NAME} -f /workspace/environment.yml 2>&1 || {
                     echo "Error: All methods to create conda environment failed"
                     exit 1
                 }
@@ -237,23 +235,23 @@ else
     fi
     
     # Verify environment was created successfully
-    if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
-        echo "Error: Conda environment was not created successfully at ${CONDA_ENV_PATH}"
+    if ! conda env list | grep -q "^${CONDA_ENV_NAME}\s"; then
+        echo "Error: Conda environment '${CONDA_ENV_NAME}' was not created successfully"
         exit 1
     fi
-    echo "Conda environment created successfully at ${CONDA_ENV_PATH}"
+    echo "Conda environment '${CONDA_ENV_NAME}' created successfully"
 fi
 
 # Activate conda environment
 echo "Activating conda environment..."
-conda activate ${CONDA_ENV_PATH} || {
-    echo "Error: Failed to activate conda environment"
+conda activate ${CONDA_ENV_NAME} || {
+    echo "Error: Failed to activate conda environment '${CONDA_ENV_NAME}'"
     exit 1
 }
 
 # Verify activation worked
-if [ "$(conda info --envs | grep -c "${CONDA_ENV_PATH}")" -eq 0 ]; then
-    echo "Warning: Environment activation may have failed, but continuing..."
+if [ "$CONDA_DEFAULT_ENV" != "${CONDA_ENV_NAME}" ]; then
+    echo "Warning: Environment activation may have failed (current env: ${CONDA_DEFAULT_ENV:-none}), but continuing..."
 fi
 
 # Upgrade pip
@@ -557,7 +555,7 @@ cat > /opt/setup-dfl-env.sh << EOF
 #!/bin/bash
 # Activate DeepFaceLab conda environment
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate ${CONDA_ENV_PATH}
+conda activate ${CONDA_ENV_NAME}
 export DFL_PYTHON="python"
 export DFL_WORKSPACE="${DEEPFACELAB_PATH}/workspace/"
 export DFL_ROOT="${DEEPFACELAB_PATH}/"
@@ -573,6 +571,6 @@ ln -sf ${DEEPFACELAB_PATH} /opt/DeepFaceLab 2>/dev/null || true
 echo "=== Provisioning Complete ==="
 echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
 echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
-echo "Conda environment: ${CONDA_ENV_PATH}"
-echo "To activate: source /opt/setup-dfl-env.sh"
+echo "Conda environment: ${CONDA_ENV_NAME}"
+echo "To activate: source /opt/setup-dfl-env.sh or conda activate ${CONDA_ENV_NAME}"
 echo "VNC server should be running on :1"
