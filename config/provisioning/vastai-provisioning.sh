@@ -187,7 +187,22 @@ if ! command -v conda &> /dev/null; then
     conda config --add channels nvidia
 else
     echo "Conda already installed, using existing installation"
-    source "$(conda info --base)/etc/profile.d/conda.sh"
+    # Find conda base directory
+    CONDA_BASE=$(conda info --base 2>/dev/null || echo "/opt/miniconda3")
+    if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+        source "${CONDA_BASE}/etc/profile.d/conda.sh"
+    elif [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
+        source /opt/miniconda3/etc/profile.d/conda.sh
+    else
+        echo "Error: Cannot find conda.sh initialization script"
+        exit 1
+    fi
+fi
+
+# Verify conda is working
+if ! command -v conda &> /dev/null; then
+    echo "Error: conda command not available after initialization"
+    exit 1
 fi
 
 # Create conda environment with Python 3.10
@@ -196,27 +211,50 @@ fi
 echo "Creating conda environment: ${CONDA_ENV_NAME}..."
 mkdir -p /opt/conda-envs
 
-# Try to create environment with cudatoolkit for TensorFlow compatibility
-# If that fails, create basic Python environment (TensorFlow will use system CUDA)
-if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>/dev/null; then
-    echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
-    echo "TensorFlow will use system CUDA libraries from the base image."
-    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge; then
-        echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
-        if [ -f "/workspace/environment.yml" ]; then
-            conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml || {
-                echo "Error: All methods to create conda environment failed"
+# Check if environment already exists
+if [ -d "${CONDA_ENV_PATH}" ] && [ -f "${CONDA_ENV_PATH}/bin/python" ]; then
+    echo "Conda environment already exists at ${CONDA_ENV_PATH}, skipping creation"
+else
+    echo "Environment does not exist, creating new conda environment..."
+    
+    # Try to create environment with cudatoolkit for TensorFlow compatibility
+    # If that fails, create basic Python environment (TensorFlow will use system CUDA)
+    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c nvidia -c conda-forge 2>&1; then
+        echo "Warning: cudatoolkit=11.8 not available, creating environment without it..."
+        echo "TensorFlow will use system CUDA libraries from the base image."
+        if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge 2>&1; then
+            echo "Error: Failed to create conda environment. Trying with environment.yml if available..."
+            if [ -f "/workspace/environment.yml" ]; then
+                conda env create -p ${CONDA_ENV_PATH} -f /workspace/environment.yml 2>&1 || {
+                    echo "Error: All methods to create conda environment failed"
+                    exit 1
+                }
+            else
+                echo "Error: Cannot create conda environment and no environment.yml found"
                 exit 1
-            }
-        else
-            echo "Error: Cannot create conda environment and no environment.yml found"
-            exit 1
+            fi
         fi
     fi
+    
+    # Verify environment was created successfully
+    if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
+        echo "Error: Conda environment was not created successfully at ${CONDA_ENV_PATH}"
+        exit 1
+    fi
+    echo "Conda environment created successfully at ${CONDA_ENV_PATH}"
 fi
 
 # Activate conda environment
-conda activate ${CONDA_ENV_PATH}
+echo "Activating conda environment..."
+conda activate ${CONDA_ENV_PATH} || {
+    echo "Error: Failed to activate conda environment"
+    exit 1
+}
+
+# Verify activation worked
+if [ "$(conda info --envs | grep -c "${CONDA_ENV_PATH}")" -eq 0 ]; then
+    echo "Warning: Environment activation may have failed, but continuing..."
+fi
 
 # Upgrade pip
 python -m pip install --no-cache-dir --upgrade pip setuptools wheel

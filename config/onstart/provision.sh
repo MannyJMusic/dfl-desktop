@@ -73,11 +73,29 @@ if ! command -v conda >/dev/null 2>&1; then
   # Add conda-forge (idempotent)
   conda config --add channels conda-forge 2>/dev/null || true
   conda config --set channel_priority strict
+else
+  # Conda already installed, find and source it
+  CONDA_BASE=$(conda info --base 2>/dev/null || echo "/opt/miniconda3")
+  if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+    source "${CONDA_BASE}/etc/profile.d/conda.sh"
+  elif [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
+    source /opt/miniconda3/etc/profile.d/conda.sh
+  else
+    log "Warning: Cannot find conda.sh, trying default location"
+    [ -f /opt/miniconda3/etc/profile.d/conda.sh ] && source /opt/miniconda3/etc/profile.d/conda.sh || true
+  fi
 fi
-source /opt/miniconda3/etc/profile.d/conda.sh
+
+# Verify conda is available
+if ! command -v conda >/dev/null 2>&1; then
+  log "Error: conda command not available after initialization"
+  exit 1
+fi
 
 # 4) Create env only once
-if [ ! -d /opt/conda-envs/deepfacelab ]; then
+CONDA_ENV_PATH="/opt/conda-envs/deepfacelab"
+if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
+  log "Creating conda environment at ${CONDA_ENV_PATH}..."
   mkdir -p /opt/conda-envs
   # Ensure conda-forge is configured (in case conda was already installed)
   conda config --set channel_priority strict 2>/dev/null || true
@@ -86,11 +104,31 @@ if [ ! -d /opt/conda-envs/deepfacelab ]; then
   conda config --remove channels https://repo.anaconda.com/pkgs/r 2>/dev/null || true
   conda config --remove channels defaults 2>/dev/null || true
   conda config --add channels conda-forge 2>/dev/null || true
-  conda create -y -p /opt/conda-envs/deepfacelab python=3.10 cudatoolkit=11.8 -c conda-forge --override-channels || \
-  conda create -y -p /opt/conda-envs/deepfacelab python=3.10 -c conda-forge --override-channels
-  log "conda env created"
+  
+  # Try creating with cudatoolkit first, fallback to basic Python
+  if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 cudatoolkit=11.8 -c conda-forge --override-channels 2>&1; then
+    log "cudatoolkit=11.8 not available, creating environment without it..."
+    if ! conda create -y -p ${CONDA_ENV_PATH} python=3.10 -c conda-forge --override-channels 2>&1; then
+      log "Error: Failed to create conda environment"
+      exit 1
+    fi
+  fi
+  
+  # Verify environment was created
+  if [ ! -d "${CONDA_ENV_PATH}" ] || [ ! -f "${CONDA_ENV_PATH}/bin/python" ]; then
+    log "Error: Conda environment was not created successfully"
+    exit 1
+  fi
+  log "conda env created successfully"
+else
+  log "conda env already exists at ${CONDA_ENV_PATH}"
 fi
-conda activate /opt/conda-envs/deepfacelab || true
+
+# Activate the environment
+log "Activating conda environment..."
+conda activate ${CONDA_ENV_PATH} || {
+  log "Warning: Failed to activate conda environment, but continuing..."
+}
 
 # 5) Install TF once
 python -c "import tensorflow" >/dev/null 2>&1 || { 
