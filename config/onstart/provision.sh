@@ -197,23 +197,49 @@ pgrep -f "vncserver :1" >/dev/null 2>&1 || vncserver :1 -geometry 1920x1080 -dep
 if [ ! -d /opt/scripts ] || [ -z "$(ls -A /opt/scripts 2>/dev/null)" ]; then
   log "Setting up /opt/scripts directory..."
   mkdir -p /opt/scripts
+  
+  # Debug: Check what script sources exist
+  log "Checking for script sources..."
+  [ -d "/opt/scripts-source" ] && log "  - /opt/scripts-source exists: $(ls -A /opt/scripts-source 2>/dev/null | wc -l) files" || log "  - /opt/scripts-source does not exist"
+  [ -d "/opt/DFL-MVE/DeepFaceLab/scripts" ] && log "  - /opt/DFL-MVE/DeepFaceLab/scripts exists: $(ls -A /opt/DFL-MVE/DeepFaceLab/scripts 2>/dev/null | wc -l) files" || log "  - /opt/DFL-MVE/DeepFaceLab/scripts does not exist"
+  [ -d "/workspace/scripts" ] && log "  - /workspace/scripts exists: $(ls -A /workspace/scripts 2>/dev/null | wc -l) files" || log "  - /workspace/scripts does not exist"
+  
+  # Try to copy from multiple sources (in priority order)
+  SCRIPTS_COPIED=0
+  
   # Copy from image source first (if scripts were baked into the image)
   if [ -d "/opt/scripts-source" ] && [ "$(ls -A /opt/scripts-source 2>/dev/null)" ]; then
+    log "Copying scripts from /opt/scripts-source to /opt/scripts..."
     cp -r /opt/scripts-source/* /opt/scripts/ 2>/dev/null || true
     chmod +x /opt/scripts/*.sh 2>/dev/null || true
-    log "Copied scripts from image source to /opt/scripts"
-  # Try to copy scripts from DFL-MVE repository if it exists
-  elif [ -d "/opt/DFL-MVE/DeepFaceLab/scripts" ] && [ "$(ls -A /opt/DFL-MVE/DeepFaceLab/scripts 2>/dev/null)" ]; then
+    SCRIPTS_COPIED=1
+    log "Successfully copied scripts from image source to /opt/scripts"
+  fi
+  
+  # Try to copy scripts from DFL-MVE repository if it exists (and we haven't copied yet)
+  if [ $SCRIPTS_COPIED -eq 0 ] && [ -d "/opt/DFL-MVE/DeepFaceLab/scripts" ] && [ "$(ls -A /opt/DFL-MVE/DeepFaceLab/scripts 2>/dev/null)" ]; then
+    log "Copying scripts from DFL-MVE repository to /opt/scripts..."
     cp -r /opt/DFL-MVE/DeepFaceLab/scripts/* /opt/scripts/ 2>/dev/null || true
     chmod +x /opt/scripts/*.sh 2>/dev/null || true
-    log "Copied scripts from DFL-MVE repository to /opt/scripts"
-  # Or copy from workspace if available
-  elif [ -d "/workspace/scripts" ] && [ "$(ls -A /workspace/scripts 2>/dev/null)" ]; then
+    SCRIPTS_COPIED=1
+    log "Successfully copied scripts from DFL-MVE repository to /opt/scripts"
+  fi
+  
+  # Or copy from workspace if available (and we haven't copied yet)
+  if [ $SCRIPTS_COPIED -eq 0 ] && [ -d "/workspace/scripts" ] && [ "$(ls -A /workspace/scripts 2>/dev/null)" ]; then
+    log "Copying scripts from /workspace/scripts to /opt/scripts..."
     cp -r /workspace/scripts/* /opt/scripts/ 2>/dev/null || true
     chmod +x /opt/scripts/*.sh 2>/dev/null || true
-    log "Copied scripts from /workspace/scripts to /opt/scripts"
-  else
+    SCRIPTS_COPIED=1
+    log "Successfully copied scripts from /workspace/scripts to /opt/scripts"
+  fi
+  
+  # Final check
+  if [ $SCRIPTS_COPIED -eq 0 ]; then
     log "Warning: No scripts found to copy to /opt/scripts"
+    log "  Checked locations: /opt/scripts-source, /opt/DFL-MVE/DeepFaceLab/scripts, /workspace/scripts"
+  else
+    log "Scripts successfully set up in /opt/scripts ($(ls -1 /opt/scripts/*.sh 2>/dev/null | wc -l) scripts found)"
   fi
 fi
 
