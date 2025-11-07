@@ -286,6 +286,13 @@ python -m pip install --no-cache-dir \
     werkzeug==2.3.7 \
     itsdangerous==2.1.2
 
+# Fix flatbuffers version conflict: TensorFlow 2.13 requires >=23.1.21, but tf2onnx installs 2.0.7
+# Install compatible version after tf2onnx to satisfy TensorFlow's requirement
+echo "Fixing flatbuffers version conflict..."
+python -m pip install --no-cache-dir --upgrade "flatbuffers>=23.1.21" || {
+    echo "Warning: Could not upgrade flatbuffers, but continuing..."
+}
+
 # Clone DFL-MVE repository
 echo "Cloning DFL-MVE repository..."
 if [ ! -d "${DFL_MVE_PATH}" ]; then

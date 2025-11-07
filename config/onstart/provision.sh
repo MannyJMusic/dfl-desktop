@@ -159,7 +159,15 @@ if [ ! -f "$MARKER" ]; then
     jsonschema \
     Jinja2==3.1.2 \
     werkzeug==2.3.7 \
-    itsdangerous==2.1.2 && touch "$MARKER"
+    itsdangerous==2.1.2
+  
+  # Fix flatbuffers version conflict: TensorFlow 2.13 requires >=23.1.21, but tf2onnx installs 2.0.7
+  log "Fixing flatbuffers version conflict..."
+  python -m pip install --no-cache-dir --upgrade "flatbuffers>=23.1.21" || {
+    log "Warning: Could not upgrade flatbuffers, but continuing..."
+  }
+  
+  touch "$MARKER"
 fi
 
 # 7) VNC setup (idempotent)
