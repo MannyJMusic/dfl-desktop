@@ -123,8 +123,17 @@ else
   log "conda env '${CONDA_ENV_NAME}' created successfully"
 fi
 
-# Activate the environment
+# Activate the environment (deactivate 'main' venv first if active)
 log "Activating conda environment..."
+# Deactivate any existing venv/conda environment (especially 'main' from base image)
+if [ -n "$VIRTUAL_ENV" ]; then
+  log "Deactivating existing venv: $VIRTUAL_ENV"
+  deactivate 2>/dev/null || true
+fi
+if [ -n "$CONDA_DEFAULT_ENV" ] && [ "$CONDA_DEFAULT_ENV" != "${CONDA_ENV_NAME}" ]; then
+  log "Deactivating existing conda env: $CONDA_DEFAULT_ENV"
+  conda deactivate 2>/dev/null || true
+fi
 conda activate ${CONDA_ENV_NAME} || {
   log "Warning: Failed to activate conda environment, but continuing..."
 }
@@ -188,6 +197,13 @@ pgrep -f "vncserver :1" >/dev/null 2>&1 || vncserver :1 -geometry 1920x1080 -dep
 [ -f /opt/setup-dfl-env.sh ] || cat >/opt/setup-dfl-env.sh <<'EOS'
 #!/usr/bin/env bash
 source /opt/miniconda3/etc/profile.d/conda.sh
+# Deactivate any existing venv/conda environment (especially 'main' from base image)
+if [ -n "$VIRTUAL_ENV" ]; then
+    deactivate 2>/dev/null || true
+fi
+if [ -n "$CONDA_DEFAULT_ENV" ] && [ "$CONDA_DEFAULT_ENV" != "deepfacelab" ]; then
+    conda deactivate 2>/dev/null || true
+fi
 conda activate deepfacelab
 export DFL_PYTHON=python
 export DFL_WORKSPACE=/opt/workspace/
@@ -204,6 +220,13 @@ if ! grep -q "DFL auto-setup" /root/.bashrc 2>/dev/null; then
 # DFL auto-setup: Initialize conda and activate deepfacelab environment on SSH login
 if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
     source /opt/miniconda3/etc/profile.d/conda.sh
+    # Deactivate any existing venv/conda environment (especially 'main' from base image)
+    if [ -n "$VIRTUAL_ENV" ]; then
+        deactivate 2>/dev/null || true
+    fi
+    if [ -n "$CONDA_DEFAULT_ENV" ] && [ "$CONDA_DEFAULT_ENV" != "deepfacelab" ]; then
+        conda deactivate 2>/dev/null || true
+    fi
     # Activate conda environment by name
     conda activate deepfacelab 2>/dev/null || true
 fi

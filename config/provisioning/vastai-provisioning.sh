@@ -242,8 +242,17 @@ else
     echo "Conda environment '${CONDA_ENV_NAME}' created successfully"
 fi
 
-# Activate conda environment
+# Activate conda environment (deactivate 'main' venv first if active)
 echo "Activating conda environment..."
+# Deactivate any existing venv/conda environment (especially 'main' from base image)
+if [ -n "$VIRTUAL_ENV" ]; then
+    echo "Deactivating existing venv: $VIRTUAL_ENV"
+    deactivate 2>/dev/null || true
+fi
+if [ -n "$CONDA_DEFAULT_ENV" ] && [ "$CONDA_DEFAULT_ENV" != "${CONDA_ENV_NAME}" ]; then
+    echo "Deactivating existing conda env: $CONDA_DEFAULT_ENV"
+    conda deactivate 2>/dev/null || true
+fi
 conda activate ${CONDA_ENV_NAME} || {
     echo "Error: Failed to activate conda environment '${CONDA_ENV_NAME}'"
     exit 1
@@ -555,18 +564,50 @@ cat > /opt/setup-dfl-env.sh << EOF
 #!/bin/bash
 # Activate DeepFaceLab conda environment
 source "$(conda info --base)/etc/profile.d/conda.sh"
+# Deactivate any existing venv/conda environment (especially 'main' from base image)
+if [ -n "\$VIRTUAL_ENV" ]; then
+    deactivate 2>/dev/null || true
+fi
+if [ -n "\$CONDA_DEFAULT_ENV" ] && [ "\$CONDA_DEFAULT_ENV" != "${CONDA_ENV_NAME}" ]; then
+    conda deactivate 2>/dev/null || true
+fi
 conda activate ${CONDA_ENV_NAME}
 export DFL_PYTHON="python"
 export DFL_WORKSPACE="${DEEPFACELAB_PATH}/workspace/"
 export DFL_ROOT="${DEEPFACELAB_PATH}/"
 export DFL_SRC="${DEEPFACELAB_PATH}/DeepFaceLab"
-cd ${DEEPFACELAB_PATH}
+cd /opt/scripts
 EOF
 chmod +x /opt/setup-dfl-env.sh
 
 # Create symlink for convenience (in /opt, not /root)
 ln -sf ${DEEPFACELAB_PATH}/workspace /opt/workspace 2>/dev/null || true
 ln -sf ${DEEPFACELAB_PATH} /opt/DeepFaceLab 2>/dev/null || true
+
+# Setup .bashrc for automatic conda activation and directory change on SSH login
+if ! grep -q "DFL auto-setup" /root/.bashrc 2>/dev/null; then
+    cat >> /root/.bashrc <<'BASHRC_EOF'
+
+# DFL auto-setup: Initialize conda and activate deepfacelab environment on SSH login
+if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
+    source /opt/miniconda3/etc/profile.d/conda.sh
+    # Deactivate any existing venv/conda environment (especially 'main' from base image)
+    if [ -n "$VIRTUAL_ENV" ]; then
+        deactivate 2>/dev/null || true
+    fi
+    if [ -n "$CONDA_DEFAULT_ENV" ] && [ "$CONDA_DEFAULT_ENV" != "deepfacelab" ]; then
+        conda deactivate 2>/dev/null || true
+    fi
+    # Activate conda environment by name
+    conda activate deepfacelab 2>/dev/null || true
+fi
+# Change to scripts directory on SSH login
+if [ -d /opt/scripts ]; then
+    cd /opt/scripts
+fi
+BASHRC_EOF
+    echo "Added auto-setup to .bashrc"
+fi
 
 echo "=== Provisioning Complete ==="
 echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
