@@ -197,8 +197,13 @@ pgrep -f "vncserver :1" >/dev/null 2>&1 || vncserver :1 -geometry 1920x1080 -dep
 if [ ! -d /opt/scripts ] || [ -z "$(ls -A /opt/scripts 2>/dev/null)" ]; then
   log "Setting up /opt/scripts directory..."
   mkdir -p /opt/scripts
+  # Copy from image source first (if scripts were baked into the image)
+  if [ -d "/opt/scripts-source" ] && [ "$(ls -A /opt/scripts-source 2>/dev/null)" ]; then
+    cp -r /opt/scripts-source/* /opt/scripts/ 2>/dev/null || true
+    chmod +x /opt/scripts/*.sh 2>/dev/null || true
+    log "Copied scripts from image source to /opt/scripts"
   # Try to copy scripts from DFL-MVE repository if it exists
-  if [ -d "/opt/DFL-MVE/DeepFaceLab/scripts" ] && [ "$(ls -A /opt/DFL-MVE/DeepFaceLab/scripts 2>/dev/null)" ]; then
+  elif [ -d "/opt/DFL-MVE/DeepFaceLab/scripts" ] && [ "$(ls -A /opt/DFL-MVE/DeepFaceLab/scripts 2>/dev/null)" ]; then
     cp -r /opt/DFL-MVE/DeepFaceLab/scripts/* /opt/scripts/ 2>/dev/null || true
     chmod +x /opt/scripts/*.sh 2>/dev/null || true
     log "Copied scripts from DFL-MVE repository to /opt/scripts"

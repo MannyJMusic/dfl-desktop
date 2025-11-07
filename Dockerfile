@@ -40,6 +40,10 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 COPY config/provisioning/ /opt/provisioning/
 RUN chmod -R +x /opt/provisioning/*.sh || true
 
+# Copy DeepFaceLab scripts into the image
+COPY scripts/ /opt/scripts-source/
+RUN chmod -R +x /opt/scripts-source/*.sh || true
+
 # Vast.ai base image handles the rest via provisioning script
 # The provisioning script (PROVISIONING_SCRIPT env var) will:
 # - Install and configure SSH server (openssh-server)

@@ -332,8 +332,13 @@ fi
 # Copy scripts to /opt/scripts for user convenience (where users land on SSH)
 echo "Setting up /opt/scripts directory..."
 mkdir -p /opt/scripts
+# Copy from image source first (if scripts were baked into the image)
+if [ -d "/opt/scripts-source" ] && [ "$(ls -A /opt/scripts-source 2>/dev/null)" ]; then
+    cp -r /opt/scripts-source/* /opt/scripts/ 2>/dev/null || true
+    chmod +x /opt/scripts/*.sh 2>/dev/null || true
+    echo "Copied scripts from image source to /opt/scripts"
 # Copy from DFL-MVE repository if it exists
-if [ -d "${DEEPFACELAB_PATH}/scripts" ] && [ "$(ls -A ${DEEPFACELAB_PATH}/scripts 2>/dev/null)" ]; then
+elif [ -d "${DEEPFACELAB_PATH}/scripts" ] && [ "$(ls -A ${DEEPFACELAB_PATH}/scripts 2>/dev/null)" ]; then
     cp -r ${DEEPFACELAB_PATH}/scripts/* /opt/scripts/ 2>/dev/null || true
     chmod +x /opt/scripts/*.sh 2>/dev/null || true
     echo "Copied scripts from DFL-MVE repository to /opt/scripts"
