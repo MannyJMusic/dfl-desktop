@@ -629,8 +629,8 @@ EOF
 chmod +x /opt/setup-dfl-env.sh
 
 # Create symlink for convenience (in /opt, not /root)
-ln -sf ${DEEPFACELAB_PATH}/workspace /opt/workspace 2>/dev/null || true
-ln -sf ${DEEPFACELAB_PATH} /opt/DeepFaceLab 2>/dev/null || true
+#ln -sf ${DEEPFACELAB_PATH}/workspace /opt/workspace 2>/dev/null || true
+#ln -sf ${DEEPFACELAB_PATH} /opt/DeepFaceLab 2>/dev/null || true
 
 # Setup .bashrc for automatic conda activation and directory change on SSH login
 if ! grep -q "DFL auto-setup" /root/.bashrc 2>/dev/null; then
@@ -650,16 +650,16 @@ if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
     conda activate deepfacelab 2>/dev/null || true
 fi
 # Change to scripts directory on SSH login
-if [ -d /opt/scripts ]; then
-    cd /opt/scripts
+if [ -d /DFL-MVE/scripts ]; then
+    cd /DFL-MVE/scripts
 fi
 BASHRC_EOF
     echo "Added auto-setup to .bashrc"
 fi
 
 echo "=== Provisioning Complete ==="
-echo "DeepFaceLab installed at: ${DEEPFACELAB_PATH}"
-echo "Workspace available at: ${DEEPFACELAB_PATH}/workspace"
+echo "DeepFaceLab installed at: ${DFL_MVE_PATH}"
+echo "Workspace available at: ${DFL_MVE_PATH}/workspace"
 echo "Conda environment: ${CONDA_ENV_NAME}"
 echo "To activate: source /opt/setup-dfl-env.sh or conda activate ${CONDA_ENV_NAME}"
 echo "VNC server should be running on :1"
