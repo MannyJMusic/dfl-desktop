@@ -310,23 +310,23 @@ fi
 
 # Create workspace directories
 echo "Creating workspace directories..."
-mkdir -p ${DEEPFACELAB_PATH}/workspace
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_src/aligned_debug
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned
-mkdir -p ${DEEPFACELAB_PATH}/workspace/data_dst/aligned_debug
-mkdir -p ${DEEPFACELAB_PATH}/workspace/model
+mkdir -p ${DFL_MVE_PATH}/workspace
+mkdir -p ${DFL_MVE_PATH}/workspace/data_src
+mkdir -p ${DFL_MVE_PATH}/workspace/data_src/aligned
+mkdir -p ${DFL_MVE_PATH}/workspace/data_src/aligned_debug
+mkdir -p ${DFL_MVE_PATH}/workspace/data_dst
+mkdir -p ${DFL_MVE_PATH}/workspace/data_dst/aligned
+mkdir -p ${DFL_MVE_PATH}/workspace/data_dst/aligned_debug
+mkdir -p ${DFL_MVE_PATH}/workspace/model
 
 # Copy runtime scripts if they exist in workspace, otherwise create placeholder
 echo "Setting up runtime scripts..."
 if [ -d "/workspace/scripts" ]; then
-    cp -r /workspace/scripts ${DEEPFACELAB_PATH}/scripts
+    cp -r /workspace/scripts ${DFL_MVE_PATH}/scripts
     chmod +x ${DEEPFACELAB_PATH}/scripts/*.sh
 else
     echo "Warning: Runtime scripts not found in /workspace/scripts"
-    mkdir -p ${DEEPFACELAB_PATH}/scripts
+    mkdir -p ${DFL_MVE_PATH}/scripts
 fi
 
 # Copy scripts to /opt/scripts for user convenience (where users land on SSH)
@@ -336,7 +336,7 @@ mkdir -p /opt/scripts
 # Debug: Check what script sources exist
 echo "Checking for script sources..."
 [ -d "/opt/scripts-source" ] && echo "  - /opt/scripts-source exists: $(ls -A /opt/scripts-source 2>/dev/null | wc -l) files" || echo "  - /opt/scripts-source does not exist"
-[ -d "${DEEPFACELAB_PATH}/scripts" ] && echo "  - ${DEEPFACELAB_PATH}/scripts exists: $(ls -A ${DEEPFACELAB_PATH}/scripts 2>/dev/null | wc -l) files" || echo "  - ${DEEPFACELAB_PATH}/scripts does not exist"
+[ -d "${DFL_MVE_PATH}/scripts" ] && echo "  - ${DFL_MVE_PATH}/scripts exists: $(ls -A ${DFL_MVE_PATH}/scripts 2>/dev/null | wc -l) files" || echo "  - ${DFL_MVE_PATH}/scripts does not exist"
 [ -d "/workspace/scripts" ] && echo "  - /workspace/scripts exists: $(ls -A /workspace/scripts 2>/dev/null | wc -l) files" || echo "  - /workspace/scripts does not exist"
 
 # Try to copy from multiple sources (in priority order)
@@ -352,9 +352,9 @@ if [ -d "/opt/scripts-source" ] && [ "$(ls -A /opt/scripts-source 2>/dev/null)" 
 fi
 
 # Copy from DFL-MVE repository if it exists (and we haven't copied yet)
-if [ $SCRIPTS_COPIED -eq 0 ] && [ -d "${DEEPFACELAB_PATH}/scripts" ] && [ "$(ls -A ${DEEPFACELAB_PATH}/scripts 2>/dev/null)" ]; then
+    if [ $SCRIPTS_COPIED -eq 0 ] && [ -d "${DFL_MVE_PATH}/scripts" ] && [ "$(ls -A ${DFL_MVE_PATH}/scripts 2>/dev/null)" ]; then
     echo "Copying scripts from DFL-MVE repository to /opt/scripts..."
-    cp -r ${DEEPFACELAB_PATH}/scripts/* /opt/scripts/ 2>/dev/null || true
+    cp -r ${DFL_MVE_PATH}/scripts/* /opt/scripts/ 2>/dev/null || true
     chmod +x /opt/scripts/*.sh 2>/dev/null || true
     SCRIPTS_COPIED=1
     echo "Successfully copied scripts from DFL-MVE repository to /opt/scripts"
@@ -372,7 +372,7 @@ fi
 # Final check
 if [ $SCRIPTS_COPIED -eq 0 ]; then
     echo "Warning: No scripts found to copy to /opt/scripts"
-    echo "  Checked locations: /opt/scripts-source, ${DEEPFACELAB_PATH}/scripts, /workspace/scripts"
+    echo "  Checked locations: /opt/scripts-source, ${DFL_MVE_PATH}/scripts, /workspace/scripts"
 else
     echo "Scripts successfully set up in /opt/scripts ($(ls -1 /opt/scripts/*.sh 2>/dev/null | wc -l) scripts found)"
 fi
@@ -479,72 +479,72 @@ fi
 # Set up PORTAL_CONFIG for Vast.ai Instance Portal
 # VNC typically runs on port 5901, mapping to external port
 # Instance Portal runs on port 11111 internally, accessible via port 1111 externally
-echo "Configuring Vast.ai Portal..."
+#echo "Configuring Vast.ai Portal..."
 
 # Determine external ports assigned by Vast.ai (fallbacks to standard)
-EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
-EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
+#EXTERNAL_VNC_PORT="${VAST_TCP_PORT_5901:-5901}"
+#EXTERNAL_PORTAL_PORT="${VAST_TCP_PORT_11111:-1111}"
 
 # Build PORTAL_CONFIG using detected external ports unless an explicit value was provided
 # Use port 6901 for web VNC access (websockify) instead of 5901 (raw VNC)
-DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:6901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
-PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
-export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
+#DEFAULT_PORTAL_CONFIG="localhost:${EXTERNAL_VNC_PORT}:6901:/:VNC Desktop|localhost:${EXTERNAL_PORTAL_PORT}:11111:/:Instance Portal"
+#PORTAL_CONFIG_VALUE="${PORTAL_CONFIG:-$DEFAULT_PORTAL_CONFIG}"
+#export PORTAL_CONFIG="$PORTAL_CONFIG_VALUE"
 
 # Write PORTAL_CONFIG to multiple locations for Vast.ai to pick it up
 # 1. /etc/environment (for system-wide environment variables)
 #    Use a safe replace that doesn't break on '|' or '/' in values
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^PORTAL_CONFIG=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
+#TMP_ENV_FILE=$(mktemp)
+#if [ -f /etc/environment ]; then
+#    grep -v '^PORTAL_CONFIG=' /etc/environment > "$TMP_ENV_FILE" || true
+#else
+#    : > "$TMP_ENV_FILE"
+#fi
+#printf 'PORTAL_CONFIG="%s"\n' "$PORTAL_CONFIG_VALUE" >> "$TMP_ENV_FILE"
+#mv "$TMP_ENV_FILE" /etc/environment
 
 # 2. Ensure OPEN_BUTTON_PORT and OPEN_BUTTON_TOKEN are set
-OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-$EXTERNAL_PORTAL_PORT}"
-OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
+#OPEN_BUTTON_PORT="${OPEN_BUTTON_PORT:-$EXTERNAL_PORTAL_PORT}"
+#OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-1}"
 
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^OPEN_BUTTON_PORT=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'OPEN_BUTTON_PORT=%s\n' "$OPEN_BUTTON_PORT" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
+#TMP_ENV_FILE=$(mktemp)
+#if [ -f /etc/environment ]; then
+#    grep -v '^OPEN_BUTTON_PORT=' /etc/environment > "$TMP_ENV_FILE" || true
+#else
+#    : > "$TMP_ENV_FILE"
+#fi
+#printf 'OPEN_BUTTON_PORT=%s\n' "$OPEN_BUTTON_PORT" >> "$TMP_ENV_FILE"
+#mv "$TMP_ENV_FILE" /etc/environment
 
-TMP_ENV_FILE=$(mktemp)
-if [ -f /etc/environment ]; then
-    grep -v '^OPEN_BUTTON_TOKEN=' /etc/environment > "$TMP_ENV_FILE" || true
-else
-    : > "$TMP_ENV_FILE"
-fi
-printf 'OPEN_BUTTON_TOKEN=%s\n' "$OPEN_BUTTON_TOKEN" >> "$TMP_ENV_FILE"
-mv "$TMP_ENV_FILE" /etc/environment
+#TMP_ENV_FILE=$(mktemp)
+#if [ -f /etc/environment ]; then
+#    grep -v '^OPEN_BUTTON_TOKEN=' /etc/environment > "$TMP_ENV_FILE" || true
+#else
+#    : > "$TMP_ENV_FILE"
+#fi
+#printf 'OPEN_BUTTON_TOKEN=%s\n' "$OPEN_BUTTON_TOKEN" >> "$TMP_ENV_FILE"
+#mv "$TMP_ENV_FILE" /etc/environment
 
 # 3. Create portal.yaml file (Vast.ai base image may read this)
 # Note: Vast.ai primarily uses PORTAL_CONFIG env var, but portal.yaml provides backup
-mkdir -p /etc
-# Write PORTAL_CONFIG in the expected string format
-cat > /etc/portal.yaml << EOF
+#mkdir -p /etc
+#Write PORTAL_CONFIG in the expected string format
+#cat > /etc/portal.yaml << EOF
 # Vast.ai Instance Portal Configuration
 # This file is a backup - PORTAL_CONFIG env var is the primary source
 # Format string: Interface:ExternalPort:InternalPort:Path:Name
-${PORTAL_CONFIG_VALUE}
-EOF
+#${PORTAL_CONFIG_VALUE}
+#EOF
 
 # Export for current session
-export OPEN_BUTTON_PORT
-export OPEN_BUTTON_TOKEN
+#export OPEN_BUTTON_PORT
+#export OPEN_BUTTON_TOKEN
 
 # Debug: Print portal configuration for verification
-echo "Portal configuration:"
-echo "  PORTAL_CONFIG: ${PORTAL_CONFIG_VALUE}"
-echo "  OPEN_BUTTON_PORT: ${OPEN_BUTTON_PORT}"
-echo "  OPEN_BUTTON_TOKEN: ${OPEN_BUTTON_TOKEN}"
+#echo "Portal configuration:"
+#echo "  PORTAL_CONFIG: ${PORTAL_CONFIG_VALUE}"
+#echo "  OPEN_BUTTON_PORT: ${OPEN_BUTTON_PORT}"
+#echo "  OPEN_BUTTON_TOKEN: ${OPEN_BUTTON_TOKEN}"
 
 # Create supervisor scripts if supervisor directory exists
 if [ -d "/opt/supervisor-scripts" ]; then
