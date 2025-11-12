@@ -1,0 +1,10 @@
+__pycache__/
+!*.md
+!*.txt
+!*.jpg
+!requirements*
+!Dockerfile*
+!*.sh
+*.bat
+*.zip
+test*
