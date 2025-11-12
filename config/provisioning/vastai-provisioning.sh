@@ -270,28 +270,110 @@ python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 echo "Installing TensorFlow 2.13..."
 python -m pip install --no-cache-dir tensorflow==2.13.0
 
+# ------------------------------
+# Version detection helpers
+# ------------------------------
+ver_ge() {
+    local v1="$1" v2="$2"
+    [[ -z "$v1" || -z "$v2" ]] && return 1
+    [[ "$v1" == "$v2" ]] && return 0
+    local lower
+    lower=$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | head -n1)
+    [[ "$lower" == "$v2" ]]
+}
+
+detect_python_version() {
+    python - <<'PY' 2>/dev/null || true
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+}
+
+detect_cuda_version() {
+    local cuda=""
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        cuda=$(nvidia-smi --query-gpu=cuda_version --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ')
+    fi
+    if [[ -z "$cuda" ]] && command -v nvcc >/dev/null 2>&1; then
+        cuda=$(nvcc --version 2>/dev/null | awk '/release/ {gsub(/,/, "", $5); split($5, ver, "."); print ver[1]"."ver[2]; exit}')
+    fi
+    echo "$cuda"
+}
+
+detect_architecture() {
+    uname -m 2>/dev/null || echo ""
+}
+
+select_requirements_file() {
+    local py_version="$1"
+    local cuda_version="$2"
+    local arch="$3"
+    local candidate=""
+    local modern_req="${DEEPFACELAB_PATH}/requirements-cuda-python310.txt"
+    local legacy_req="${DEEPFACELAB_PATH}/requirements-cuda.txt"
+
+    # Prefer Python 3.11+ tailored requirement sets when available
+    if [[ "$py_version" =~ ^3\.(1[1-3])$ ]]; then
+        local minor="${BASH_REMATCH[1]}"
+        local base_req="${DEEPFACELAB_PATH}/requirements_3.${minor}"
+        local arm_req="${base_req}_arm64.txt"
+        local x86_req="${base_req}.txt"
+
+        if [[ "$arch" =~ (aarch64|arm64) ]] && [[ -f "$arm_req" ]]; then
+            candidate="$arm_req"
+        elif [[ -f "$x86_req" ]]; then
+            candidate="$x86_req"
+        elif [[ -f "$arm_req" ]]; then
+            candidate="$arm_req"
+        fi
+    fi
+
+    if [[ -z "$candidate" && -n "$py_version" && -n "$cuda_version" ]] && \
+       ver_ge "$py_version" "3.10" && ver_ge "$cuda_version" "12.0" && \
+       [[ -f "$modern_req" ]]; then
+        candidate="$modern_req"
+    fi
+
+    if [[ -z "$candidate" ]]; then
+        if [[ -f "$legacy_req" ]]; then
+            candidate="$legacy_req"
+        else
+            candidate="$modern_req"
+        fi
+    fi
+
+    echo "$candidate"
+}
+
+# Detect environment characteristics
+PY_VERSION_DETECTED=$(detect_python_version)
+CUDA_VERSION_DETECTED=$(detect_cuda_version)
+ARCH_DETECTED=$(detect_architecture)
+REQUIREMENTS_FILE=$(select_requirements_file "$PY_VERSION_DETECTED" "$CUDA_VERSION_DETECTED" "$ARCH_DETECTED")
+
+echo "Detected Python version: ${PY_VERSION_DETECTED:-unknown}"
+echo "Detected CUDA version: ${CUDA_VERSION_DETECTED:-unknown}"
+echo "Detected architecture: ${ARCH_DETECTED:-unknown}"
+echo "Using requirements file: ${REQUIREMENTS_FILE}"
+
+DFL_ENV_INFO_FILE="/opt/DFL-MVE/.dfl_env_info"
+mkdir -p /opt/DFL-MVE
+cat > "${DFL_ENV_INFO_FILE}" <<EOF
+You are now in the DeepFaceLab environment (conda env: deepfacelab)
+Python: ${PY_VERSION_DETECTED:-unknown}
+CUDA: ${CUDA_VERSION_DETECTED:-unknown}
+Architecture: ${ARCH_DETECTED:-unknown}
+Requirements: $(basename "${REQUIREMENTS_FILE}")
+EOF
+
+if [[ ! -f "$REQUIREMENTS_FILE" ]]; then
+    echo "Error: Requirements file '${REQUIREMENTS_FILE}' not found"
+    exit 1
+fi
+
 # Install DeepFaceLab Python dependencies
-echo "Installing DeepFaceLab dependencies..."
-python -m pip install --no-cache-dir \
-    tqdm \
-    numpy==1.23.5 \
-    numexpr \
-    h5py==3.8.0 \
-    opencv-python==4.8.1.78 \
-    ffmpeg-python==0.1.17 \
-    scikit-image==0.21.0 \
-    scipy==1.11.3 \
-    colorama \
-    pyqt5 \
-    tf2onnx==1.15.0 \
-    Flask==2.3.3 \
-    flask-socketio==5.3.5 \
-    tensorboardX \
-    crc32c \
-    jsonschema \
-    Jinja2==3.1.2 \
-    werkzeug==2.3.7 \
-    itsdangerous==2.1.2
+echo "Installing DeepFaceLab dependencies from ${REQUIREMENTS_FILE}..."
+python -m pip install --no-cache-dir -r "${REQUIREMENTS_FILE}"
 
 # Fix flatbuffers version conflict: TensorFlow 2.13 requires >=23.1.21, but tf2onnx installs 2.0.7
 # Install compatible version after tf2onnx to satisfy TensorFlow's requirement
@@ -650,8 +732,14 @@ if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
     conda activate deepfacelab 2>/dev/null || true
 fi
 # Change to scripts directory on SSH login
-if [ -d /DFL-MVE/scripts ]; then
-    cd /DFL-MVE/scripts
+if [ -d /opt/DFL-MVE/scripts ]; then
+    cd /opt/DFL-MVE/scripts
+fi
+# Display environment info
+if [ -f /opt/DFL-MVE/.dfl_env_info ]; then
+    echo
+    cat /opt/DFL-MVE/.dfl_env_info
+    echo
 fi
 BASHRC_EOF
     echo "Added auto-setup to .bashrc"
