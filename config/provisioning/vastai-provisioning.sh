@@ -385,7 +385,7 @@ python -m pip install --no-cache-dir --upgrade "flatbuffers>=23.1.21" || {
 # Clone DFL-MVE repository
 echo "Cloning DFL-MVE repository..."
 if [ ! -d "${DFL_MVE_PATH}" ]; then
-    git clone https://github.com/MannyJMusic/DFL-MVE.git ${DFL_MVE_PATH}
+    git clone https://github.com/MannyJMusic/dfl-desktop.git ${DFL_MVE_PATH}
 else
     echo "DFL-MVE already exists, skipping clone"
 fi
