@@ -4,9 +4,9 @@
 set -eo pipefail
 
 # Define paths (everything goes to /opt/)
-export DFL_MVE_PATH=/opt/DFL-MVE
-export DEEPFACELAB_PATH=/opt/DFL-MVE/DeepFaceLab
-export MVE_PATH=/opt/MachineVideoEditor
+export DFL_MVE_PATH=/opt/deepfacelab
+export DEEPFACELAB_PATH=/opt/deepfacelab/DeepFaceLab
+export MVE_PATH=/opt/machinevideoeditor
 export CONDA_ENV_NAME=deepfacelab
 
 # Change to workspace for persistence
