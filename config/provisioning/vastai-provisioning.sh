@@ -435,8 +435,8 @@ echo "Detected CUDA version: ${CUDA_VERSION_DETECTED:-unknown}"
 echo "Detected architecture: ${ARCH_DETECTED:-unknown}"
 echo "Using requirements file: ${REQUIREMENTS_FILE}"
 
-DFL_ENV_INFO_FILE="/opt/DFL-MVE/.dfl_env_info"
-mkdir -p /opt/DFL-MVE
+DFL_ENV_INFO_FILE="/opt/deepfacelab/.dfl_env_info"
+mkdir -p /opt/deepfacelab
 cat > "${DFL_ENV_INFO_FILE}" <<EOF
 You are now in the DeepFaceLab environment (conda env: deepfacelab)
 Python: ${PY_VERSION_DETECTED:-unknown}
