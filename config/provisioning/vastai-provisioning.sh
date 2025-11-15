@@ -480,12 +480,29 @@ if [[ -n "$REQUIREMENTS_FILE" ]] && [[ -f "$REQUIREMENTS_FILE" ]]; then
     echo "Installing DeepFaceLab dependencies from ${REQUIREMENTS_FILE}..."
     python -m pip install --no-cache-dir -r "${REQUIREMENTS_FILE}"
     
-    # Fix flatbuffers version conflict: TensorFlow 2.13 requires >=23.1.21, but tf2onnx installs 2.0.7
-    # Install compatible version after tf2onnx to satisfy TensorFlow's requirement
+    # Fix flatbuffers version conflict: TensorFlow 2.13 requires >=23.1.21
+    # Upgrade flatbuffers first to satisfy TensorFlow's requirement
     echo "Fixing flatbuffers version conflict..."
     python -m pip install --no-cache-dir --upgrade "flatbuffers>=23.1.21" || {
         echo "Warning: Could not upgrade flatbuffers, but continuing..."
     }
+    
+    # Install tf2onnx separately after flatbuffers upgrade (removed from requirements due to conflict)
+    # Use --no-deps to prevent it from downgrading flatbuffers, then install its dependencies manually
+    echo "Installing tf2onnx (separate install due to flatbuffers conflict)..."
+    if python -m pip install --no-cache-dir --no-deps "tf2onnx==1.9.3"; then
+        # Install tf2onnx dependencies manually (excluding flatbuffers which we keep at >=23.1.21)
+        python -m pip install --no-cache-dir "onnx>=1.4.1" "requests" || {
+            echo "Warning: Could not install tf2onnx dependencies, but continuing..."
+        }
+    else
+        # If --no-deps fails, try with dependencies but force flatbuffers to stay upgraded
+        echo "Installing tf2onnx with dependencies (forcing flatbuffers version)..."
+        python -m pip install --no-cache-dir "tf2onnx==1.9.3" && \
+        python -m pip install --no-cache-dir --upgrade --force-reinstall "flatbuffers>=23.1.21" || {
+            echo "Warning: Could not install tf2onnx or maintain flatbuffers version, but continuing..."
+        }
+    fi
 else
     echo "Warning: Skipping DeepFaceLab dependency installation (no valid requirements file)"
 fi
