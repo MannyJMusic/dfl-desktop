@@ -292,12 +292,42 @@ PY
 detect_cuda_version() {
     local cuda=""
     if command -v nvidia-smi >/dev/null 2>&1; then
-        cuda=$(nvidia-smi --query-gpu=cuda_version --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ')
+        # Try to query CUDA version, filtering out error messages
+        local nvidia_output
+        nvidia_output=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1)
+        if [[ -n "$nvidia_output" ]] && ! echo "$nvidia_output" | grep -qi "error\|invalid\|not.*valid"; then
+            # Try driver_version first, then try to get CUDA capability
+            cuda=$(nvidia-smi --query-gpu=cuda_version --format=csv,noheader 2>/dev/null 2>&1 | head -n1 | grep -E '^[0-9]+\.[0-9]+' | head -n1 | tr -d ' ')
+            # If that fails, try compute_cap (CUDA capability) and map to CUDA version
+            if [[ -z "$cuda" ]] || echo "$cuda" | grep -qi "error\|invalid\|not.*valid"; then
+                local compute_cap
+                compute_cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ')
+                # Map compute capability to approximate CUDA version (rough approximation)
+                if [[ -n "$compute_cap" ]] && [[ "$compute_cap" =~ ^[0-9]+\.[0-9]+$ ]]; then
+                    # Assume modern GPU supports CUDA 11.8+
+                    if ver_ge "$compute_cap" "7.0"; then
+                        cuda="11.8"
+                    elif ver_ge "$compute_cap" "6.0"; then
+                        cuda="11.0"
+                    else
+                        cuda="10.0"
+                    fi
+                fi
+            fi
+        fi
     fi
-    if [[ -z "$cuda" ]] && command -v nvcc >/dev/null 2>&1; then
-        cuda=$(nvcc --version 2>/dev/null | awk '/release/ {gsub(/,/, "", $5); split($5, ver, "."); print ver[1]"."ver[2]; exit}')
+    # Fallback to nvcc if still no CUDA version
+    if [[ -z "$cuda" ]] || echo "$cuda" | grep -qi "error\|invalid\|not.*valid"; then
+        if command -v nvcc >/dev/null 2>&1; then
+            cuda=$(nvcc --version 2>/dev/null | awk '/release/ {gsub(/,/, "", $5); split($5, ver, "."); print ver[1]"."ver[2]; exit}')
+        fi
     fi
-    echo "$cuda"
+    # Filter out any error messages - return empty string if we get an error
+    if echo "$cuda" | grep -qi "error\|invalid\|not.*valid\|field"; then
+        echo ""
+    else
+        echo "$cuda"
+    fi
 }
 
 detect_architecture() {
@@ -345,6 +375,34 @@ select_requirements_file() {
     echo "$candidate"
 }
 
+# Clone DFL-MVE repository first (before requirements file selection)
+echo "Cloning DFL-MVE repository..."
+if [ ! -d "${DFL_MVE_PATH}" ]; then
+    git clone https://github.com/MannyJMusic/dfl-desktop.git ${DFL_MVE_PATH}
+else
+    echo "DFL-MVE already exists, skipping clone"
+fi
+
+# Clone DeepFaceLab if it doesn't exist (it may be part of dfl-desktop or separate)
+if [ ! -d "${DEEPFACELAB_PATH}" ]; then
+    echo "DeepFaceLab not found, cloning..."
+    # Check if DeepFaceLab is a subdirectory in DFL-MVE first
+    if [ -d "${DFL_MVE_PATH}/DeepFaceLab" ]; then
+        echo "DeepFaceLab found in DFL-MVE, creating symlink or copying..."
+        # Create parent directory if needed
+        mkdir -p "$(dirname "${DEEPFACELAB_PATH}")"
+        # Try symlink first, fall back to copy if symlink fails
+        ln -sf "${DFL_MVE_PATH}/DeepFaceLab" "${DEEPFACELAB_PATH}" 2>/dev/null || \
+        cp -r "${DFL_MVE_PATH}/DeepFaceLab" "${DEEPFACELAB_PATH}" 2>/dev/null || true
+    else
+        # Clone DeepFaceLab separately if not found
+        mkdir -p "$(dirname "${DEEPFACELAB_PATH}")"
+        git clone https://github.com/iperov/DeepFaceLab.git "${DEEPFACELAB_PATH}" 2>/dev/null || {
+            echo "Warning: Could not clone DeepFaceLab from official repo, will use fallback requirements"
+        }
+    fi
+fi
+
 # Detect environment characteristics
 PY_VERSION_DETECTED=$(detect_python_version)
 CUDA_VERSION_DETECTED=$(detect_cuda_version)
@@ -366,28 +424,49 @@ Architecture: ${ARCH_DETECTED:-unknown}
 Requirements: $(basename "${REQUIREMENTS_FILE}")
 EOF
 
+# Check if requirements file exists, if not try fallback options
 if [[ ! -f "$REQUIREMENTS_FILE" ]]; then
-    echo "Error: Requirements file '${REQUIREMENTS_FILE}' not found"
-    exit 1
+    echo "Warning: Requirements file '${REQUIREMENTS_FILE}' not found"
+    # Try to find any requirements file in DeepFaceLab directory
+    if [ -d "${DEEPFACELAB_PATH}" ]; then
+        # Try common fallback requirements files
+        fallback_req=""
+        if [ -f "${DEEPFACELAB_PATH}/requirements-cuda.txt" ]; then
+            fallback_req="${DEEPFACELAB_PATH}/requirements-cuda.txt"
+        elif [ -f "${DEEPFACELAB_PATH}/requirements.txt" ]; then
+            fallback_req="${DEEPFACELAB_PATH}/requirements.txt"
+        elif [ -f "${DEEPFACELAB_PATH}/requirements_3.10.txt" ]; then
+            fallback_req="${DEEPFACELAB_PATH}/requirements_3.10.txt"
+        fi
+        
+        if [ -n "$fallback_req" ] && [ -f "$fallback_req" ]; then
+            echo "Using fallback requirements file: ${fallback_req}"
+            REQUIREMENTS_FILE="$fallback_req"
+        else
+            echo "Error: No suitable requirements file found. DeepFaceLab may not be properly cloned."
+            echo "Attempting to continue without DeepFaceLab dependencies (user can install manually)..."
+            REQUIREMENTS_FILE=""
+        fi
+    else
+        echo "Error: DeepFaceLab directory '${DEEPFACELAB_PATH}' does not exist"
+        echo "Note: Provisioning encountered issues but instance startup will continue"
+        REQUIREMENTS_FILE=""
+    fi
 fi
 
-# Install DeepFaceLab Python dependencies
-echo "Installing DeepFaceLab dependencies from ${REQUIREMENTS_FILE}..."
-python -m pip install --no-cache-dir -r "${REQUIREMENTS_FILE}"
-
-# Fix flatbuffers version conflict: TensorFlow 2.13 requires >=23.1.21, but tf2onnx installs 2.0.7
-# Install compatible version after tf2onnx to satisfy TensorFlow's requirement
-echo "Fixing flatbuffers version conflict..."
-python -m pip install --no-cache-dir --upgrade "flatbuffers>=23.1.21" || {
-    echo "Warning: Could not upgrade flatbuffers, but continuing..."
-}
-
-# Clone DFL-MVE repository
-echo "Cloning DFL-MVE repository..."
-if [ ! -d "${DFL_MVE_PATH}" ]; then
-    git clone https://github.com/MannyJMusic/dfl-desktop.git ${DFL_MVE_PATH}
+# Install DeepFaceLab Python dependencies if we have a valid requirements file
+if [[ -n "$REQUIREMENTS_FILE" ]] && [[ -f "$REQUIREMENTS_FILE" ]]; then
+    echo "Installing DeepFaceLab dependencies from ${REQUIREMENTS_FILE}..."
+    python -m pip install --no-cache-dir -r "${REQUIREMENTS_FILE}"
+    
+    # Fix flatbuffers version conflict: TensorFlow 2.13 requires >=23.1.21, but tf2onnx installs 2.0.7
+    # Install compatible version after tf2onnx to satisfy TensorFlow's requirement
+    echo "Fixing flatbuffers version conflict..."
+    python -m pip install --no-cache-dir --upgrade "flatbuffers>=23.1.21" || {
+        echo "Warning: Could not upgrade flatbuffers, but continuing..."
+    }
 else
-    echo "DFL-MVE already exists, skipping clone"
+    echo "Warning: Skipping DeepFaceLab dependency installation (no valid requirements file)"
 fi
 
 # Create workspace directories
