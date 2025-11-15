@@ -11,7 +11,7 @@ h5py==3.8.0
 PySide6==6.6.1
 numexpr==2.9.0
 pyqt5
-tf2onnx==1.15.0
+tf2onnx==1.9.3
 Flask==2.3.3
 flask-socketio==5.3.5
 tensorboardX
