@@ -341,35 +341,56 @@ select_requirements_file() {
     local candidate=""
     local modern_req="${DEEPFACELAB_PATH}/requirements-cuda-python310.txt"
     local legacy_req="${DEEPFACELAB_PATH}/requirements-cuda.txt"
+    local generic_req="${DEEPFACELAB_PATH}/requirements.txt"
 
-    # Prefer Python 3.11+ tailored requirement sets when available
-    if [[ "$py_version" =~ ^3\.(1[1-3])$ ]]; then
+    # Priority 1: Python 3.10-3.13 tailored requirement sets (check architecture-specific first)
+    if [[ "$py_version" =~ ^3\.(1[0-3])$ ]]; then
         local minor="${BASH_REMATCH[1]}"
         local base_req="${DEEPFACELAB_PATH}/requirements_3.${minor}"
         local arm_req="${base_req}_arm64.txt"
         local x86_req="${base_req}.txt"
 
-        if [[ "$arch" =~ (aarch64|arm64) ]] && [[ -f "$arm_req" ]]; then
+        # For ARM64, prefer ARM-specific file
+        if [[ "$arch" =~ (aarch64|arm64) ]] && [[ -f "$arm_req" ]] && [[ -s "$arm_req" ]]; then
             candidate="$arm_req"
-        elif [[ -f "$x86_req" ]]; then
+        # For x86_64 or unknown, prefer x86 file (but skip if empty)
+        elif [[ -f "$x86_req" ]] && [[ -s "$x86_req" ]]; then
             candidate="$x86_req"
-        elif [[ -f "$arm_req" ]]; then
+        # Fallback: use ARM file even on x86 if x86 doesn't exist or is empty
+        elif [[ -f "$arm_req" ]] && [[ -s "$arm_req" ]]; then
             candidate="$arm_req"
         fi
     fi
 
+    # Priority 2: Python 3.10+ with CUDA 12.0+ specific requirements
     if [[ -z "$candidate" && -n "$py_version" && -n "$cuda_version" ]] && \
        ver_ge "$py_version" "3.10" && ver_ge "$cuda_version" "12.0" && \
-       [[ -f "$modern_req" ]]; then
+       [[ -f "$modern_req" ]] && [[ -s "$modern_req" ]]; then
         candidate="$modern_req"
     fi
 
+    # Priority 3: Python 3.10+ with CUDA (any version) - use modern CUDA requirements
+    if [[ -z "$candidate" && -n "$py_version" ]] && \
+       ver_ge "$py_version" "3.10" && \
+       [[ -f "$modern_req" ]] && [[ -s "$modern_req" ]]; then
+        candidate="$modern_req"
+    fi
+
+    # Priority 4: Legacy CUDA requirements (for older CUDA versions)
+    if [[ -z "$candidate" ]] && \
+       [[ -f "$legacy_req" ]] && [[ -s "$legacy_req" ]]; then
+        candidate="$legacy_req"
+    fi
+
+    # Priority 5: Generic requirements.txt (fallback)
+    if [[ -z "$candidate" ]] && \
+       [[ -f "$generic_req" ]] && [[ -s "$generic_req" ]]; then
+        candidate="$generic_req"
+    fi
+
+    # Final fallback: use modern_req as default (even if it might not exist - will be handled later)
     if [[ -z "$candidate" ]]; then
-        if [[ -f "$legacy_req" ]]; then
-            candidate="$legacy_req"
-        else
-            candidate="$modern_req"
-        fi
+        candidate="$modern_req"
     fi
 
     echo "$candidate"
