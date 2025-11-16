@@ -397,6 +397,12 @@ class VastAIDeepFaceLabCLI:
             return
 
         volume_plan = self._configure_volume(volume_offers)
+        
+        # Get disk size default from template or use 50GB
+        template_disk = template.get("disk_space") or template.get("disk")
+        default_disk = int(template_disk) if template_disk else 50
+        disk_size = prompt_int("Container disk size (GB)", default=default_disk, minimum=10)
+        
         ssh_flag = prompt_yes_no("Enable direct SSH access via --ssh flag", default=True)
         direct_flag = prompt_yes_no("Request direct port access via --direct flag", default=True)
 
@@ -405,6 +411,7 @@ class VastAIDeepFaceLabCLI:
             "Creating instance with:",
             f"  Offer ID: {offer.get('id')} (machine {machine_id})",
             f"  Template: {template.get('name', template.get('id'))}",
+            f"  Disk size: {disk_size}GB",
         ]
         if volume_plan.mode == "link":
             summary_lines.append(f"  Linking volume {volume_plan.identifier} at {volume_plan.mount_path}")
@@ -425,6 +432,7 @@ class VastAIDeepFaceLabCLI:
         print("\n".join(summary_lines))
         command_args: List[str] = ["create", "instance", str(offer.get("id"))]
         command_args.extend(["--template_hash", str(template_hash)])
+        command_args.extend(["--disk", str(disk_size)])
 
         if volume_plan.mode == "link":
             command_args.extend(

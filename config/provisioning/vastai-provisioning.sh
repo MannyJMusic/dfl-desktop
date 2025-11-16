@@ -26,7 +26,6 @@ CORE_PACKAGES=(
     curl
     build-essential
     python3-dev
-    libgl1-mesa-glx
     libglib2.0-0
     libsm6
     libxext6
@@ -54,7 +53,20 @@ VNC_PACKAGES=(
 )
 
 echo "Installing core packages: ${CORE_PACKAGES[*]}"
-apt-get install -y --no-install-recommends "${CORE_PACKAGES[@]}"
+apt-get install -y --no-install-recommends "${CORE_PACKAGES[@]}" || {
+    echo "WARNING: Some core packages failed to install, continuing..."
+}
+
+# Install OpenGL libraries (package names vary by Ubuntu version)
+# Ubuntu 18.04/20.04/22.04 use libgl1-mesa-glx, Ubuntu 24.04+ uses libgl1 and libglx-mesa0
+echo "Installing OpenGL libraries..."
+if apt-get install -y --no-install-recommends libgl1-mesa-glx 2>/dev/null; then
+    echo "Installed libgl1-mesa-glx (older Ubuntu versions)"
+elif apt-get install -y --no-install-recommends libgl1 libglx-mesa0 2>/dev/null; then
+    echo "Installed libgl1 and libglx-mesa0 (Ubuntu 24.04+)"
+else
+    echo "WARNING: Could not install OpenGL libraries. Graphics support may be limited."
+fi
 
 echo "Installing VNC/desktop packages (best-effort): ${VNC_PACKAGES[*]}"
 if ! apt-get install -y --no-install-recommends "${VNC_PACKAGES[@]}"; then
