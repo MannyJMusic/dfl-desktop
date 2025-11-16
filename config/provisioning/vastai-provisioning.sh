@@ -32,7 +32,6 @@ CORE_PACKAGES=(
     libxext6
     libxrender-dev
     libgomp1
-    kde-plasma-desktop
     network-manager
     openssh-server
 )
@@ -50,7 +49,6 @@ VNC_PACKAGES=(
     xfce4
     xfce4-goodies
     xfce4-notifyd
-    kde-config-screenlocker
     websockify
     novnc
 )
