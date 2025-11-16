@@ -716,7 +716,7 @@ fi
 if command -v websockify &> /dev/null; then
     echo "Starting websockify on port 6901..."
     # Bind to 0.0.0.0 to make it accessible from outside the container
-    nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+    nohup websockify --web /usr/share/novnc/ 0.0.0.0:6901 localhost:5901 > /tmp/websockify.log 2>&1 &
     echo "Web VNC access available at http://localhost:6901/"
 else
     echo "WARNING: 'websockify' is still not available after pip install attempt."
@@ -837,7 +837,7 @@ while true; do
     if ! pgrep -f "websockify.*6901" > /dev/null; then
         if command -v websockify &> /dev/null; then
             # Bind to 0.0.0.0 to make it accessible from outside the container
-            nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+            nohup websockify --web /usr/share/novnc/ 0.0.0.0:6901 localhost:5901 > /tmp/websockify.log 2>&1 &
         fi
     fi
     sleep 30
