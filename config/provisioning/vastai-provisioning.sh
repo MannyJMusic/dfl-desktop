@@ -635,6 +635,13 @@ if command -v vncserver &> /dev/null; then
     # Create xstartup script for XFCE4 Desktop Environment
     cat > ${VNC_HOME}/.vnc/xstartup << 'EOF'
 #!/bin/bash
+# Redirect output to log file for debugging
+LOG_FILE="$HOME/.vnc/xstartup.log"
+exec > "$LOG_FILE" 2>&1
+
+echo "=== VNC xstartup (XFCE) starting at $(date) ==="
+
+# Load X resources if available
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 
 export XKL_XMODMAP_DISABLE=1
@@ -648,24 +655,28 @@ if [ -x /usr/bin/dbus-launch ]; then
     export DBUS_SESSION_BUS_PID
 fi
 
-# Start XFCE4 Desktop Environment
-if [ -x /usr/bin/startxfce4 ]; then
-    /usr/bin/startxfce4 &
+# Start XFCE session (forever)
+if command -v startxfce4 >/dev/null 2>&1; then
+  exec startxfce4
+elif command -v xfce4-session >/dev/null 2>&1; then
+  exec xfce4-session
 else
-    # Fallback to simple window manager
-    [ -x /usr/bin/twm ] && /usr/bin/twm &
-    [ -x /usr/bin/xterm ] && /usr/bin/xterm -geometry 80x24+10+10 -ls &
+  echo "ERROR: XFCE not installed, starting xterm"
+  [ -x /usr/bin/xterm ] && xterm -geometry 80x24+0+0 &
+  wait
 fi
-
-# Keep the script running
-wait
 EOF
 
     chmod +x ${VNC_HOME}/.vnc/xstartup
 
     # Start VNC server in background
     echo "Starting VNC server..."
+    # Kill any existing VNC server on :1 first
+    vncserver -kill :1 2>/dev/null || true
+    sleep 1
+    # Start VNC server
     vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1
+    echo "VNC server started on :1 (port 5901)"
 else
     echo "WARNING: 'vncserver' command not found. VNC desktop on port 5901 will NOT be available."
     echo "Ensure a VNC server (e.g. tigervnc-standalone-server) is installed on this image."
@@ -675,21 +686,30 @@ fi
 echo "Setting up websockify for web VNC access..."
 
 # Ensure noVNC files exist; if the novnc package wasn't available, fetch from GitHub
+mkdir -p /usr/share/novnc
 if [ ! -f /usr/share/novnc/vnc_lite.html ]; then
     echo "noVNC not found in /usr/share/novnc, attempting to fetch from GitHub..."
-    mkdir -p /usr/share/novnc
     # Best-effort clone of the noVNC client; failure here should not break the rest of provisioning
     if command -v git >/dev/null 2>&1; then
-        rm -rf /usr/share/novnc/.git 2>/dev/null || true
-        git clone --depth 1 https://github.com/novnc/noVNC.git /usr/share/novnc 2>/dev/null || true
+        # Clone to a temporary location first, then move contents
+        TEMP_NOVNC=$(mktemp -d)
+        git clone --depth 1 https://github.com/novnc/noVNC.git "$TEMP_NOVNC" 2>&1 || true
+        if [ -f "$TEMP_NOVNC/vnc_lite.html" ]; then
+            # Copy contents to /usr/share/novnc
+            cp -r "$TEMP_NOVNC"/* /usr/share/novnc/ 2>/dev/null || true
+            cp -r "$TEMP_NOVNC"/.* /usr/share/novnc/ 2>/dev/null || true
+            rm -rf "$TEMP_NOVNC"
+            echo "noVNC downloaded successfully"
+        else
+            echo "Warning: noVNC clone failed, trying alternative..."
+            rm -rf "$TEMP_NOVNC"
+        fi
     fi
 fi
 
-# Ensure novnc directory exists (in case clone failed)
-mkdir -p /usr/share/novnc
-
-# Create index.html redirect to vnc_lite.html for easier access
-cat > /usr/share/novnc/index.html << 'EOF'
+# Create index.html redirect to vnc_lite.html for easier access (only if vnc_lite.html exists)
+if [ -f /usr/share/novnc/vnc_lite.html ]; then
+    cat > /usr/share/novnc/index.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
@@ -701,6 +721,7 @@ cat > /usr/share/novnc/index.html << 'EOF'
 </body>
 </html>
 EOF
+fi
 
 # Ensure websockify is available; if the OS package is missing, try installing via pip
 if ! command -v websockify &> /dev/null; then
@@ -715,9 +736,15 @@ fi
 # Start websockify to forward port 6901 to VNC server on port 5901
 if command -v websockify &> /dev/null; then
     echo "Starting websockify on port 6901..."
+    # Kill any existing websockify on port 6901
+    pkill -f "websockify.*6901" 2>/dev/null || true
+    sleep 1
     # Bind to 0.0.0.0 to make it accessible from outside the container
+    # Correct syntax: websockify [options] [source_addr:]source_port target_addr:target_port
     nohup websockify --web /usr/share/novnc/ 0.0.0.0:6901 localhost:5901 > /tmp/websockify.log 2>&1 &
+    echo "websockify started on port 6901"
     echo "Web VNC access available at http://localhost:6901/"
+    echo "Password: ${VNC_PASSWORD:-deepfacelab}"
 else
     echo "WARNING: 'websockify' is still not available after pip install attempt."
     echo "Web VNC access on port 6901 will NOT be available until websockify is installed."
