@@ -16,37 +16,56 @@ echo "=== Starting DeepFaceLab Provisioning ==="
 
 # Install system dependencies
 echo "Installing system dependencies..."
-apt-get update && \
-    apt-get install -y --no-install-recommends \
-    git \
-    wget \
-    unzip \
-    curl \
-    build-essential \
-    python3-dev \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    kde-plasma-desktop \
-    tigervnc-standalone-server \
-    tigervnc-tools \
-    tigervnc-xorg-extension \
-    tigervnc-common \
-    dbus-x11 \
-    x11-xserver-utils \
-    xfce4 \
-    xfce4-goodies \
-    xfce4-notifyd \
-    kde-config-screenlocker \
-    websockify \
-    novnc \
-    network-manager \
-    openssh-server \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+apt-get update
+
+# Core packages that are required for the environment to function 
+CORE_PACKAGES=(
+    git
+    wget
+    unzip
+    curl
+    build-essential
+    python3-dev
+    libgl1-mesa-glx
+    libglib2.0-0
+    libsm6
+    libxext6
+    libxrender-dev
+    libgomp1
+    kde-plasma-desktop
+    network-manager
+    openssh-server
+)
+
+# VNC / desktop related packages. Some images may not have all of these in their
+# repositories (for example, tigervnc-standalone-server, novnc, websockify).
+# We install them best-effort and handle missing pieces later in the script.
+VNC_PACKAGES=(
+    tigervnc-standalone-server
+    tigervnc-tools
+    tigervnc-xorg-extension
+    tigervnc-common
+    dbus-x11
+    x11-xserver-utils
+    xfce4
+    xfce4-goodies
+    xfce4-notifyd
+    kde-config-screenlocker
+    websockify
+    novnc
+)
+
+echo "Installing core packages: ${CORE_PACKAGES[*]}"
+apt-get install -y --no-install-recommends "${CORE_PACKAGES[@]}"
+
+echo "Installing VNC/desktop packages (best-effort): ${VNC_PACKAGES[*]}"
+if ! apt-get install -y --no-install-recommends "${VNC_PACKAGES[@]}"; then
+    echo "WARNING: One or more VNC/desktop-related packages failed to install."
+    echo "VNC desktop or web access (5901/6901) may not be available on this image."
+fi
+
+apt-get clean
+rm -rf /var/lib/apt/lists/*
 
 # Configure SSH server (skip if already running)
 if pgrep -x sshd > /dev/null 2>&1 || ss -tlnp 2>/dev/null | grep -q "sshd"; then
@@ -590,30 +609,31 @@ else
     echo "You may need to upload it or configure download URL"
 fi
 
-# Configure VNC server
-echo "Configuring VNC server..."
-VNC_HOME=/root
-mkdir -p ${VNC_HOME}/.vnc
+# Configure VNC server (only if a VNC server binary is available)
+if command -v vncserver &> /dev/null; then
+    echo "Configuring VNC server..."
+    VNC_HOME=/root
+    mkdir -p ${VNC_HOME}/.vnc
 
-# Use VNC_PASSWORD environment variable if set, otherwise default to "deepfacelab"
-VNC_PASSWORD="${VNC_PASSWORD:-deepfacelab}"
+    # Use VNC_PASSWORD environment variable if set, otherwise default to "deepfacelab"
+    VNC_PASSWORD="${VNC_PASSWORD:-deepfacelab}"
 
-# Ensure tigervnc-tools is installed (should already be in Dockerfile, but verify)
-if ! command -v vncpasswd &> /dev/null && ! command -v tigervncpasswd &> /dev/null; then
-    echo "Installing tigervnc-tools..."
-    apt-get update && apt-get install -y --no-install-recommends tigervnc-tools && apt-get clean && rm -rf /var/lib/apt/lists/*
-fi
+    # Ensure tigervnc-tools is installed (should already be in Dockerfile, but verify)
+    if ! command -v vncpasswd &> /dev/null && ! command -v tigervncpasswd &> /dev/null; then
+        echo "Installing tigervnc-tools for VNC password management..."
+        apt-get update && apt-get install -y --no-install-recommends tigervnc-tools && apt-get clean && rm -rf /var/lib/apt/lists/*
+    fi
 
-# Find vncpasswd command (could be vncpasswd or tigervncpasswd)
-VNCPASSWD_CMD=$(command -v vncpasswd || command -v tigervncpasswd || echo "vncpasswd")
+    # Find vncpasswd command (could be vncpasswd or tigervncpasswd)
+    VNCPASSWD_CMD=$(command -v vncpasswd || command -v tigervncpasswd || echo "vncpasswd")
 
-# Create VNC password file using environment variable or default
-echo "${VNC_PASSWORD}" | ${VNCPASSWD_CMD} -f > ${VNC_HOME}/.vnc/passwd
-chmod 600 ${VNC_HOME}/.vnc/passwd
-echo "VNC password configured (from VNC_PASSWORD env var or default)"
+    # Create VNC password file using environment variable or default
+    echo "${VNC_PASSWORD}" | ${VNCPASSWD_CMD} -f > ${VNC_HOME}/.vnc/passwd
+    chmod 600 ${VNC_HOME}/.vnc/passwd
+    echo "VNC password configured (from VNC_PASSWORD env var or default)"
 
-# Create xstartup script for XFCE4 Desktop Environment
-cat > ${VNC_HOME}/.vnc/xstartup << 'EOF'
+    # Create xstartup script for XFCE4 Desktop Environment
+    cat > ${VNC_HOME}/.vnc/xstartup << 'EOF'
 #!/bin/bash
 [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
 
@@ -641,16 +661,33 @@ fi
 wait
 EOF
 
-chmod +x ${VNC_HOME}/.vnc/xstartup
+    chmod +x ${VNC_HOME}/.vnc/xstartup
 
-# Start VNC server in background
-echo "Starting VNC server..."
-vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1 || true
+    # Start VNC server in background
+    echo "Starting VNC server..."
+    vncserver :1 -geometry 1920x1080 -depth 24 > /tmp/vnc-startup.log 2>&1
+else
+    echo "WARNING: 'vncserver' command not found. VNC desktop on port 5901 will NOT be available."
+    echo "Ensure a VNC server (e.g. tigervnc-standalone-server) is installed on this image."
+fi
 
 # Set up websockify for web-based VNC access on port 6901
 echo "Setting up websockify for web VNC access..."
-# Ensure novnc directory exists
+
+# Ensure noVNC files exist; if the novnc package wasn't available, fetch from GitHub
+if [ ! -f /usr/share/novnc/vnc_lite.html ]; then
+    echo "noVNC not found in /usr/share/novnc, attempting to fetch from GitHub..."
+    mkdir -p /usr/share/novnc
+    # Best-effort clone of the noVNC client; failure here should not break the rest of provisioning
+    if command -v git >/dev/null 2>&1; then
+        rm -rf /usr/share/novnc/.git 2>/dev/null || true
+        git clone --depth 1 https://github.com/novnc/noVNC.git /usr/share/novnc 2>/dev/null || true
+    fi
+fi
+
+# Ensure novnc directory exists (in case clone failed)
 mkdir -p /usr/share/novnc
+
 # Create index.html redirect to vnc_lite.html for easier access
 cat > /usr/share/novnc/index.html << 'EOF'
 <!DOCTYPE html>
@@ -665,6 +702,16 @@ cat > /usr/share/novnc/index.html << 'EOF'
 </html>
 EOF
 
+# Ensure websockify is available; if the OS package is missing, try installing via pip
+if ! command -v websockify &> /dev/null; then
+    echo "websockify not found on PATH, attempting installation via pip..."
+    if command -v python &> /dev/null; then
+        python -m pip install --no-cache-dir websockify >/tmp/websockify-pip-install.log 2>&1 || true
+    elif command -v python3 &> /dev/null; then
+        python3 -m pip install --no-cache-dir websockify >/tmp/websockify-pip-install.log 2>&1 || true
+    fi
+fi
+
 # Start websockify to forward port 6901 to VNC server on port 5901
 if command -v websockify &> /dev/null; then
     echo "Starting websockify on port 6901..."
@@ -672,7 +719,8 @@ if command -v websockify &> /dev/null; then
     nohup websockify --web /usr/share/novnc/ --listen 0.0.0.0 6901 localhost:5901 > /tmp/websockify.log 2>&1 &
     echo "Web VNC access available at http://localhost:6901/"
 else
-    echo "Warning: websockify not found, web VNC access will not be available"
+    echo "WARNING: 'websockify' is still not available after pip install attempt."
+    echo "Web VNC access on port 6901 will NOT be available until websockify is installed."
 fi
 
 # Set up PORTAL_CONFIG for Vast.ai Instance Portal
